@@ -1,0 +1,11 @@
+[
+  {
+    "id": "evt-whistle-1",
+    "period": 2,
+    "timestamp": "00:00:00.000",
+    "minute": 45,
+    "second": 0,
+    "team": {"id": 20, "name": "Ash United"},
+    "type": {"id": 18, "name": "Half Start"}
+  }
+]
