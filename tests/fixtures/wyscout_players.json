@@ -1,0 +1,29 @@
+[
+  {
+    "firstName": "Mesut",
+    "lastName": "Ozil",
+    "shortName": "M. Ozil",
+    "currentTeamId": 1609,
+    "wyId": 25413
+  },
+  {
+    "firstName": "Free",
+    "lastName": "Agent",
+    "shortName": "",
+    "currentTeamId": 0,
+    "wyId": 99999
+  },
+  {
+    "firstName": "Unattached",
+    "lastName": "Player",
+    "shortName": "U. Player",
+    "wyId": 100000
+  },
+  {
+    "firstName": "Former",
+    "lastName": "Player",
+    "shortName": "F. Player",
+    "currentTeamId": "null",
+    "wyId": 100001
+  }
+]

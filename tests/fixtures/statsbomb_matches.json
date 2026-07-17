@@ -1,0 +1,25 @@
+[
+  {
+    "match_id": 12345,
+    "match_date": "2023-08-12",
+    "kick_off": "15:00:00.000",
+    "competition": {
+      "competition_id": 2,
+      "competition_name": "Premier League"
+    },
+    "season": {
+      "season_id": 44,
+      "season_name": "2023/2024"
+    },
+    "home_team": {
+      "home_team_id": 10,
+      "home_team_name": "Ember FC"
+    },
+    "away_team": {
+      "away_team_id": 20,
+      "away_team_name": "Ash United"
+    },
+    "home_score": 2,
+    "away_score": 1
+  }
+]
