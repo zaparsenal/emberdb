@@ -1,4 +1,5 @@
 #include "emberdb/ingestion/metrica_event_adapter.h"
+#include "emberdb/identity/canonical_identity.h"
 
 #include <chrono>
 #include <filesystem>
@@ -92,6 +93,29 @@ TEST(MetricaEventAdapterTest, RequiresDirectionMetadata) {
   EXPECT_THROW(
       static_cast<void>(adapter.loadEvents(fixture("metrica_events.csv"), {42})),
       std::runtime_error);
+}
+
+TEST(MetricaEventAdapterTest, ResolvesExplicitMatchScopedTeamMappings) {
+  const emberdb::MetricaEventAdapter adapter;
+  const auto events = adapter.loadEvents(
+      fixture("metrica_events.csv"),
+      context(emberdb::AttackingDirection::LeftToRight));
+  emberdb::CanonicalIdentityCatalog catalog;
+  catalog.addTeam({{1}, "Ember FC"});
+  catalog.addTeam({{2}, "Ash United"});
+  catalog.addMatch({{100}, "Example League", "2023/2024", std::nullopt,
+                    {1}, {2}, std::nullopt, std::nullopt});
+  catalog.mapMatch({"Metrica", "42"}, {100});
+  catalog.mapMetricaTeams("42", {1}, {2});
+
+  EXPECT_EQ(catalog.resolveEvent(events[0]).match_id,
+            emberdb::CanonicalMatchId{100});
+  EXPECT_EQ(catalog.resolveEvent(events[0]).team_id,
+            emberdb::CanonicalTeamId{1});
+  EXPECT_EQ(catalog.resolveEvent(events[1]).team_id,
+            emberdb::CanonicalTeamId{2});
+  EXPECT_EQ(catalog.resolveEvent(events[2]).team_id,
+            emberdb::CanonicalTeamId{1});
 }
 
 TEST(MetricaEventAdapterTest, PreservesOffPitchStartButDoesNotCanonicalizeIt) {

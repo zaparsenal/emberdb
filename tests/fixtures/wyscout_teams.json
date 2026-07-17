@@ -1,0 +1,16 @@
+[
+  {
+    "city": "London",
+    "name": "Arsenal",
+    "wyId": 1609,
+    "officialName": "Arsenal FC",
+    "type": "club"
+  },
+  {
+    "city": "Leicester",
+    "name": "Leicester City",
+    "wyId": 1631,
+    "officialName": "Leicester City FC",
+    "type": "club"
+  }
+]

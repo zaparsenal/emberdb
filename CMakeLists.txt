@@ -20,8 +20,11 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_library(emberdb
   src/common/coordinate_normalization.cpp
   src/common/football_event_column.cpp
+  src/identity/canonical_identity.cpp
   src/ingestion/metrica_event_adapter.cpp
+  src/ingestion/statsbomb_metadata_adapter.cpp
   src/ingestion/statsbomb_event_adapter.cpp
+  src/ingestion/wyscout_metadata_adapter.cpp
   src/ingestion/wyscout_event_adapter.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
@@ -62,10 +65,13 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/canonical_identity_test.cpp
     tests/coordinate_normalization_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
+    tests/statsbomb_metadata_adapter_test.cpp
     tests/statsbomb_event_adapter_test.cpp
+    tests/wyscout_metadata_adapter_test.cpp
     tests/wyscout_event_adapter_test.cpp
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
