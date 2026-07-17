@@ -29,6 +29,7 @@ add_library(emberdb
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
   src/reconciliation/match_reconciliation.cpp
+  src/reconciliation/match_review.cpp
   src/storage/football_event_file.cpp
   src/storage/football_event_table.cpp
 )
@@ -71,6 +72,7 @@ if(BUILD_TESTING)
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
     tests/match_reconciliation_test.cpp
+    tests/match_review_test.cpp
     tests/statsbomb_metadata_adapter_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/wyscout_metadata_adapter_test.cpp
