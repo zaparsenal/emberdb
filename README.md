@@ -13,12 +13,14 @@ Implemented milestones include:
 - provider-neutral typed equality filters and projections with explicit null results;
 - deterministic query execution that preserves imported event order;
 - typed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregation with optional grouping;
+- a versioned, checksummed columnar `.ember` file containing the normalized schema;
+- exact persistence of typed columns and explicit null bitmaps;
 - an `import` CLI with deterministic summary counts and optional preview;
 - a `query` CLI that translates filters, projections, aggregates, and grouping into the
   programmatic query APIs; and
 - offline unit fixtures covering ingestion failures, coordinates, nulls, table behavior, and queries.
 
-SQL, persistent files, compression, analytical functions, and additional providers are not implemented.
+SQL, compression, broader analytical expressions, and additional providers are not implemented.
 
 ## Architecture
 
@@ -29,10 +31,14 @@ StatsBomb event JSON
 EventProviderAdapter / StatsBombEventAdapter
         |
         v
-provider-independent FootballEvent values
+provider-independent FootballEvent values (import once)
         |
         v
 in-memory FootballEventTable (one typed vector per field)
+        |
+        +----> versioned .ember columnar file
+        |              |
+        |              +----> validated reload without provider JSON
         |
         v
 typed filters, projections, aggregations, and grouping
@@ -95,6 +101,31 @@ Preview
 ```
 
 `--match-id` is required because StatsBomb event files do not reliably include match context in each event. Provider names are selected case-sensitively; currently only `statsbomb` is accepted.
+
+Import once into an EmberDB database:
+
+```bash
+./build/emberdb_cli import \
+  --provider statsbomb \
+  --match-id 12345 \
+  --input tests/fixtures/complete_events.json \
+  --output match.ember
+```
+
+The CLI reports the resulting file size. Existing database files are never overwritten;
+choose a new output path or remove the old file explicitly.
+
+Query the saved database without reparsing provider JSON:
+
+```bash
+./build/emberdb_cli query \
+  --database match.ember \
+  --filter event_type=Pass \
+  --project player_name,minute,start_x,start_y
+```
+
+`--database` can be used with projection queries and grouped aggregation queries. It is
+mutually exclusive with `--provider`, `--match-id`, and `--input`.
 
 Filter and project events:
 
@@ -164,6 +195,27 @@ no matching rows returns no rows.
 The programmatic aggregation API is declared in
 `include/emberdb/query/aggregation_query.h`.
 
+## Persistent file format
+
+Each `.ember` database is one table in one container file. Format version 1 uses a
+fixed little-endian header containing magic bytes, the format version, flags, row count,
+and an 18-entry schema directory. Every directory entry records the stable column ID,
+physical type, nullability, offsets, sizes, and CRC32 checksums for its null bitmap and
+data payload.
+
+Nullable columns store one presence bit per row (`1` means present). Only present values
+are written to the typed payload. Identifiers and timestamps use 64-bit values;
+period, minute, and second use 32-bit values; coordinates use IEEE 754 binary64; and
+strings use a 64-bit byte length followed by their bytes. The format stores normalized
+provider-neutral columns, never raw StatsBomb JSON.
+
+Loading validates the magic, exact format version and schema, flags, canonical segment
+layout, file bounds, bitmap sizes and unused bits, payload sizes, checksums, string
+lengths, coordinate nullability, and reconstructed column lengths. Unsupported versions,
+truncated files, corruption, trailing data, and schema mismatches fail with file and
+column context. Writes use a temporary sibling and rename only after the complete file
+has been written.
+
 ## Data and coordinate semantics
 
 StatsBomb timestamps are parsed into millisecond durations relative to the event period. The provider's `minute` and `second` fields are also retained as typed values.
@@ -174,7 +226,8 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 ## Current limitations
 
-- Imports live only for the duration of the CLI process; there is no persistent file format.
+- Version 1 files are uncompressed and are loaded fully into memory; there is no metadata
+  pruning, streaming scan, schema migration, or partial-column loader yet.
 - Equality is the only filter operation; there is no ordering, result limiting, SQL,
   optimizer, general expression evaluation, or distinct aggregation yet.
 - No compression, dictionary encoding, parallelism, SIMD, or memory mapping is used.
@@ -187,7 +240,6 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
 The recommended next milestone is coordinate normalization into a documented common
-pitch scale, followed by persistent columnar storage and then a limited SQL parser.
-A second provider adapter and cross-provider reconciliation should follow. SQL should
-translate into the existing typed filter, projection, aggregation, and grouping
-operations rather than bypassing them.
+pitch scale, followed by a second provider adapter and cross-provider reconciliation.
+SQL is deliberately deferred; when resumed, it should translate into the existing typed
+filter, projection, aggregation, and grouping operations rather than bypassing them.

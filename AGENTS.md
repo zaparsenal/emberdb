@@ -68,6 +68,15 @@ Run a grouped fixture aggregation with:
   --aggregate 'count(*)' --aggregate 'avg(start_x)'
 ```
 
+Persist and query a normalized fixture database with:
+
+```bash
+./build/emberdb_cli import --provider statsbomb --match-id 12345 \
+  --input tests/fixtures/complete_events.json --output match.ember
+./build/emberdb_cli query --database match.ember --filter event_type=Pass \
+  --project player_name,minute,start_x,start_y
+```
+
 ## Documentation discipline
 
 Keep `README.md`, this file, CLI help, tests, and CMake targets synchronized with implementation. Clearly label planned work as planned. When architecture, commands, schema semantics, coordinate conventions, or limitations change, update the relevant documentation in the same change.

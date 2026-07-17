@@ -15,6 +15,7 @@
 #include "emberdb/ingestion/statsbomb_event_adapter.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
+#include "emberdb/storage/football_event_file.h"
 #include "emberdb/storage/football_event_table.h"
 
 namespace {
@@ -25,7 +26,10 @@ struct Options {
   Command command{Command::Import};
   std::string provider;
   emberdb::Identifier match_id{};
+  bool has_match_id{};
   std::filesystem::path input;
+  std::filesystem::path output;
+  std::filesystem::path database;
   std::size_t limit{};
   bool has_limit{};
   std::vector<std::string> filters;
@@ -36,8 +40,9 @@ struct Options {
 
 void usage(std::ostream& output) {
   output << "Usage: emberdb_cli import --provider statsbomb --match-id ID --input PATH "
-            "[--limit N]\n"
-            "       emberdb_cli query --provider statsbomb --match-id ID --input PATH "
+            "[--output DATABASE] [--limit N]\n"
+            "       emberdb_cli query (--database DATABASE | --provider statsbomb "
+            "--match-id ID --input PATH) "
             "(--project COLUMN[,COLUMN...] | --aggregate FUNCTION(COLUMN|*)) "
             "[--aggregate FUNCTION(COLUMN|*)]... [--group-by COLUMN[,COLUMN...]] "
             "[--filter COLUMN=VALUE]...\n";
@@ -67,7 +72,6 @@ Options parseOptions(int argc, char** argv) {
   } else {
     throw std::runtime_error("Expected the 'import' or 'query' command");
   }
-  bool has_match_id = false;
   for (int index = 2; index < argc; ++index) {
     const std::string_view option(argv[index]);
     if (index + 1 >= argc) {
@@ -78,9 +82,13 @@ Options parseOptions(int argc, char** argv) {
       options.provider = value;
     } else if (option == "--match-id") {
       options.match_id = parseInteger<emberdb::Identifier>(value, option);
-      has_match_id = true;
+      options.has_match_id = true;
     } else if (option == "--input") {
       options.input = value;
+    } else if (option == "--output") {
+      options.output = value;
+    } else if (option == "--database") {
+      options.database = value;
     } else if (option == "--limit") {
       options.limit = parseInteger<std::size_t>(value, option);
       options.has_limit = true;
@@ -102,16 +110,35 @@ Options parseOptions(int argc, char** argv) {
       throw std::runtime_error("Unknown option '" + std::string(option) + "'");
     }
   }
-  if (options.provider.empty() || !has_match_id || options.input.empty()) {
-    throw std::runtime_error("--provider, --match-id, and --input are required");
-  }
-  if (options.command == Command::Import &&
-      (!options.filters.empty() || !options.projection.empty() ||
-       !options.group_by.empty() || !options.aggregates.empty())) {
-    throw std::runtime_error(
-        "--filter, --project, --group-by, and --aggregate are only valid for query");
-  }
-  if (options.command == Command::Query) {
+  const bool has_complete_raw_source =
+      !options.provider.empty() && options.has_match_id && !options.input.empty();
+  const bool has_any_raw_source =
+      !options.provider.empty() || options.has_match_id || !options.input.empty();
+  if (options.command == Command::Import) {
+    if (!has_complete_raw_source) {
+      throw std::runtime_error("--provider, --match-id, and --input are required for import");
+    }
+    if (!options.database.empty()) {
+      throw std::runtime_error("--database is only valid for query");
+    }
+    if (!options.filters.empty() || !options.projection.empty() ||
+        !options.group_by.empty() || !options.aggregates.empty()) {
+      throw std::runtime_error(
+          "--filter, --project, --group-by, and --aggregate are only valid for query");
+    }
+  } else {
+    if (!options.output.empty()) {
+      throw std::runtime_error("--output is only valid for import");
+    }
+    if (!options.database.empty()) {
+      if (has_any_raw_source) {
+        throw std::runtime_error(
+            "--database cannot be combined with --provider, --match-id, or --input");
+      }
+    } else if (!has_complete_raw_source) {
+      throw std::runtime_error(
+          "query requires --database or --provider, --match-id, and --input");
+    }
     if (options.projection.empty() == options.aggregates.empty()) {
       throw std::runtime_error(
           "query requires exactly one of --project or --aggregate");
@@ -124,6 +151,21 @@ Options parseOptions(int argc, char** argv) {
     }
   }
   return options;
+}
+
+emberdb::FootballEventTable importTable(const Options& options) {
+  std::unique_ptr<emberdb::EventProviderAdapter> adapter;
+  if (options.provider == "statsbomb") {
+    adapter = std::make_unique<emberdb::StatsBombEventAdapter>();
+  } else {
+    throw std::runtime_error("Unsupported provider '" + options.provider + "'");
+  }
+  const auto events = adapter->loadEvents(options.input, {options.match_id});
+  emberdb::FootballEventTable table;
+  for (const auto& event : events) {
+    table.append(event);
+  }
+  return table;
 }
 
 emberdb::FootballEventColumn parseColumn(std::string_view name) {
@@ -345,18 +387,9 @@ void printQueryResult(const emberdb::EventQueryResult& result) {
 int main(int argc, char** argv) {
   try {
     const auto options = parseOptions(argc, argv);
-    std::unique_ptr<emberdb::EventProviderAdapter> adapter;
-    if (options.provider == "statsbomb") {
-      adapter = std::make_unique<emberdb::StatsBombEventAdapter>();
-    } else {
-      throw std::runtime_error("Unsupported provider '" + options.provider + "'");
-    }
-
-    const auto events = adapter->loadEvents(options.input, {options.match_id});
-    emberdb::FootballEventTable table;
-    for (const auto& event : events) {
-      table.append(event);
-    }
+    const auto table = !options.database.empty()
+                           ? emberdb::loadFootballEventTable(options.database)
+                           : importTable(options);
     if (!table.validate()) {
       throw std::runtime_error("Internal error: column lengths are inconsistent");
     }
@@ -369,6 +402,9 @@ int main(int argc, char** argv) {
         printQueryResult(emberdb::executeQuery(table, makeQuery(options)));
       }
     } else {
+      if (!options.output.empty()) {
+        emberdb::saveFootballEventTable(table, options.output);
+      }
       std::cout << "Imported " << table.rowCount() << " events\n"
                 << "Provider: StatsBomb\n"
                 << "Match ID: " << options.match_id << '\n'
@@ -376,6 +412,11 @@ int main(int argc, char** argv) {
                 << "Events with player data: " << table.playerDataCount() << '\n'
                 << "Events with start locations: " << table.startLocationCount() << '\n'
                 << "Events with end locations: " << table.endLocationCount() << '\n';
+      if (!options.output.empty()) {
+        std::cout << "Saved database: " << options.output.string() << '\n'
+                  << "Database size: " << std::filesystem::file_size(options.output)
+                  << " bytes\n";
+      }
       printPreview(table, options.limit);
     }
     return 0;
