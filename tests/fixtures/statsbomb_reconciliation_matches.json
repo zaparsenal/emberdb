@@ -1,0 +1,25 @@
+[
+  {
+    "match_id": 12345,
+    "match_date": "2017-08-11",
+    "kick_off": "18:45:00.000",
+    "competition": {
+      "competition_id": 2,
+      "competition_name": "Premier League"
+    },
+    "season": {
+      "season_id": 44,
+      "season_name": "2017/2018"
+    },
+    "home_team": {
+      "home_team_id": 10,
+      "home_team_name": "Arsenal"
+    },
+    "away_team": {
+      "away_team_id": 20,
+      "away_team_name": "Leicester City"
+    },
+    "home_score": 4,
+    "away_score": 3
+  }
+]
