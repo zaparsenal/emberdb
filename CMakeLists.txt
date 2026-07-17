@@ -22,6 +22,7 @@ add_library(emberdb
   src/ingestion/statsbomb_event_adapter.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
+  src/storage/football_event_file.cpp
   src/storage/football_event_table.cpp
 )
 add_library(EmberDB::emberdb ALIAS emberdb)
@@ -58,6 +59,7 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/football_event_file_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
