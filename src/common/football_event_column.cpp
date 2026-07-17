@@ -9,7 +9,7 @@ namespace {
 
 using ColumnName = std::pair<FootballEventColumn, std::string_view>;
 
-constexpr std::array<ColumnName, 18> kColumnNames{{
+constexpr std::array<ColumnName, 22> kColumnNames{{
     {FootballEventColumn::ProviderEventId, "provider_event_id"},
     {FootballEventColumn::MatchId, "match_id"},
     {FootballEventColumn::Period, "period"},
@@ -28,6 +28,10 @@ constexpr std::array<ColumnName, 18> kColumnNames{{
     {FootballEventColumn::EndX, "end_x"},
     {FootballEventColumn::EndY, "end_y"},
     {FootballEventColumn::Provider, "provider"},
+    {FootballEventColumn::SourceStartX, "source_start_x"},
+    {FootballEventColumn::SourceStartY, "source_start_y"},
+    {FootballEventColumn::SourceEndX, "source_end_x"},
+    {FootballEventColumn::SourceEndY, "source_end_y"},
 }};
 
 }  // namespace
@@ -58,6 +62,10 @@ FootballEventValueType columnValueType(FootballEventColumn column) noexcept {
     case FootballEventColumn::StartY:
     case FootballEventColumn::EndX:
     case FootballEventColumn::EndY:
+    case FootballEventColumn::SourceStartX:
+    case FootballEventColumn::SourceStartY:
+    case FootballEventColumn::SourceEndX:
+    case FootballEventColumn::SourceEndY:
       return FootballEventValueType::Number;
     case FootballEventColumn::ProviderEventId:
     case FootballEventColumn::TeamName:
@@ -101,6 +109,10 @@ bool columnIsNullable(FootballEventColumn column) noexcept {
     case FootballEventColumn::StartY:
     case FootballEventColumn::EndX:
     case FootballEventColumn::EndY:
+    case FootballEventColumn::SourceStartX:
+    case FootballEventColumn::SourceStartY:
+    case FootballEventColumn::SourceEndX:
+    case FootballEventColumn::SourceEndY:
       return true;
     case FootballEventColumn::ProviderEventId:
     case FootballEventColumn::MatchId:

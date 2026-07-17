@@ -30,6 +30,10 @@ enum class FootballEventColumn {
   EndX = 15,
   EndY = 16,
   Provider = 17,
+  SourceStartX = 18,
+  SourceStartY = 19,
+  SourceEndX = 20,
+  SourceEndY = 21,
 };
 
 enum class FootballEventValueType {

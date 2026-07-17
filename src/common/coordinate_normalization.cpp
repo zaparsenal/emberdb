@@ -6,6 +6,18 @@
 
 namespace emberdb {
 
+void validateCanonicalCoordinate(Coordinate coordinate) {
+  if (!std::isfinite(coordinate.x) || !std::isfinite(coordinate.y)) {
+    throw std::invalid_argument("Canonical coordinate values must be finite");
+  }
+  if (coordinate.x < 0.0 || coordinate.x > kCanonicalPitchLength ||
+      coordinate.y < 0.0 || coordinate.y > kCanonicalPitchWidth) {
+    throw std::invalid_argument(
+        "Canonical coordinate (" + std::to_string(coordinate.x) + ", " +
+        std::to_string(coordinate.y) + ") is outside pitch bounds x=0..100, y=0..100");
+  }
+}
+
 Coordinate normalizeCoordinate(Coordinate source, PitchDimensions source_pitch,
                                AttackingDirection attacking_direction) {
   if (!std::isfinite(source_pitch.length) || !std::isfinite(source_pitch.width) ||
@@ -29,8 +41,10 @@ Coordinate normalizeCoordinate(Coordinate source, PitchDimensions source_pitch,
   if (attacking_direction == AttackingDirection::RightToLeft) {
     normalized_x = kCanonicalPitchLength - normalized_x;
   }
-  return Coordinate{normalized_x,
-                    source.y / source_pitch.width * kCanonicalPitchWidth};
+  const Coordinate normalized{
+      normalized_x, source.y / source_pitch.width * kCanonicalPitchWidth};
+  validateCanonicalCoordinate(normalized);
+  return normalized;
 }
 
 std::optional<Coordinate> normalizeCoordinate(

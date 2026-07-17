@@ -14,7 +14,7 @@ namespace emberdb {
 
 class FootballEventTable {
  public:
-  static constexpr std::size_t kColumnCount = 18;
+  static constexpr std::size_t kColumnCount = 22;
 
   void append(const FootballEvent& event);
   [[nodiscard]] std::size_t rowCount() const noexcept;
@@ -46,6 +46,10 @@ class FootballEventTable {
   std::vector<std::optional<double>> end_x_values_;
   std::vector<std::optional<double>> end_y_values_;
   std::vector<std::string> providers_;
+  std::vector<std::optional<double>> source_start_x_values_;
+  std::vector<std::optional<double>> source_start_y_values_;
+  std::vector<std::optional<double>> source_end_x_values_;
+  std::vector<std::optional<double>> source_end_y_values_;
 };
 
 }  // namespace emberdb

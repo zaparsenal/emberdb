@@ -27,7 +27,9 @@ emberdb::FootballEvent event(std::string id, std::string type,
                                 std::nullopt,
                                 start,
                                 std::nullopt,
-                                "StatsBomb"};
+                                "StatsBomb",
+                                std::nullopt,
+                                std::nullopt};
 }
 
 emberdb::FootballEventTable table() {
@@ -97,6 +99,8 @@ TEST(EventQueryTest, ResolvesStableProviderNeutralColumnNames) {
   EXPECT_EQ(emberdb::columnFromName("event_type"),
             emberdb::FootballEventColumn::EventType);
   EXPECT_EQ(emberdb::columnName(emberdb::FootballEventColumn::StartX), "start_x");
+  EXPECT_EQ(emberdb::columnFromName("source_start_x"),
+            emberdb::FootballEventColumn::SourceStartX);
   EXPECT_FALSE(emberdb::columnFromName("raw_statsbomb_type"));
 }
 

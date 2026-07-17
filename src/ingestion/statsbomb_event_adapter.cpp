@@ -10,10 +10,15 @@
 
 #include <nlohmann/json.hpp>
 
+#include "emberdb/common/coordinate_normalization.h"
+
 namespace emberdb {
 namespace {
 
 using Json = nlohmann::json;
+
+constexpr PitchDimensions kStatsBombPitch{120.0, 80.0};
+constexpr AttackingDirection kStatsBombDirection = AttackingDirection::LeftToRight;
 
 std::runtime_error eventError(std::size_t index, const std::string& message) {
   return std::runtime_error("StatsBomb event at index " + std::to_string(index) +
@@ -127,6 +132,17 @@ std::optional<Coordinate> endLocation(const Json& event, std::size_t index) {
   return std::nullopt;
 }
 
+std::optional<Coordinate> normalizeStatsBombCoordinate(
+    const std::optional<Coordinate>& source, std::string_view field,
+    std::size_t index) {
+  try {
+    return normalizeCoordinate(source, kStatsBombPitch, kStatsBombDirection);
+  } catch (const std::invalid_argument& error) {
+    throw eventError(index, "invalid coordinate field '" + std::string(field) +
+                                "': " + error.what());
+  }
+}
+
 FootballEvent normalize(const Json& event, const ImportContext& context, std::size_t index) {
   if (!event.is_object()) {
     throw eventError(index, "expected an object");
@@ -152,8 +168,12 @@ FootballEvent normalize(const Json& event, const ImportContext& context, std::si
   normalized.event_type = required<std::string>(required<Json>(event, "type", index),
                                                 "name", index);
   normalized.outcome = outcome(event, index);
-  normalized.start_location = optionalCoordinate(event, "location", index);
-  normalized.end_location = endLocation(event, index);
+  normalized.source_start_location = optionalCoordinate(event, "location", index);
+  normalized.source_end_location = endLocation(event, index);
+  normalized.start_location = normalizeStatsBombCoordinate(
+      normalized.source_start_location, "location", index);
+  normalized.end_location = normalizeStatsBombCoordinate(
+      normalized.source_end_location, "end_location", index);
   normalized.provider = "StatsBomb";
   return normalized;
 }

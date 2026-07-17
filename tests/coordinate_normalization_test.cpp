@@ -72,4 +72,13 @@ TEST(CoordinateNormalizationTest, RejectsNonFiniteCoordinatesAndDimensions) {
                std::invalid_argument);
 }
 
+TEST(CoordinateNormalizationTest, ValidatesCanonicalCoordinates) {
+  EXPECT_NO_THROW(emberdb::validateCanonicalCoordinate({0.0, 100.0}));
+  EXPECT_NO_THROW(emberdb::validateCanonicalCoordinate({100.0, 0.0}));
+  EXPECT_THROW(emberdb::validateCanonicalCoordinate({100.1, 50.0}),
+               std::invalid_argument);
+  EXPECT_THROW(emberdb::validateCanonicalCoordinate({50.0, -0.1}),
+               std::invalid_argument);
+}
+
 }  // namespace

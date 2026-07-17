@@ -18,6 +18,8 @@ struct PitchDimensions {
 
 enum class AttackingDirection { LeftToRight, RightToLeft };
 
+void validateCanonicalCoordinate(Coordinate coordinate);
+
 [[nodiscard]] Coordinate normalizeCoordinate(
     Coordinate source, PitchDimensions source_pitch,
     AttackingDirection attacking_direction);
