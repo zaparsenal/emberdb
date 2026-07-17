@@ -18,7 +18,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(emberdb
+  src/common/football_event_column.cpp
   src/ingestion/statsbomb_event_adapter.cpp
+  src/query/event_query.cpp
   src/storage/football_event_table.cpp
 )
 add_library(EmberDB::emberdb ALIAS emberdb)
@@ -56,6 +58,7 @@ if(BUILD_TESTING)
   add_executable(emberdb_tests
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
+    tests/event_query_test.cpp
   )
   target_link_libraries(emberdb_tests PRIVATE EmberDB::emberdb GTest::gtest_main)
   target_compile_definitions(emberdb_tests PRIVATE
