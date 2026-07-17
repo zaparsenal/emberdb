@@ -48,7 +48,9 @@ emberdb::FootballEvent completeEvent() {
                                 "Complete",
                                 emberdb::Coordinate{1.5, 2.5},
                                 emberdb::Coordinate{3.5, 4.5},
-                                "StatsBomb"};
+                                "StatsBomb",
+                                emberdb::Coordinate{1.8, 2.8},
+                                emberdb::Coordinate{3.8, 4.8}};
 }
 
 void expectEventEquals(const emberdb::FootballEvent& actual,
@@ -67,6 +69,8 @@ void expectEventEquals(const emberdb::FootballEvent& actual,
   EXPECT_EQ(actual.start_location, expected.start_location);
   EXPECT_EQ(actual.end_location, expected.end_location);
   EXPECT_EQ(actual.provider, expected.provider);
+  EXPECT_EQ(actual.source_start_location, expected.source_start_location);
+  EXPECT_EQ(actual.source_end_location, expected.source_end_location);
 }
 
 emberdb::FootballEventTable tableWithCompleteAndNullRows() {
@@ -82,6 +86,8 @@ emberdb::FootballEventTable tableWithCompleteAndNullRows() {
   nullable.outcome.reset();
   nullable.start_location.reset();
   nullable.end_location.reset();
+  nullable.source_start_location.reset();
+  nullable.source_end_location.reset();
   table.append(nullable);
   return table;
 }
@@ -98,7 +104,7 @@ TEST(FootballEventFileTest, RoundTripsEveryTypedAndNullableColumnExactly) {
   for (std::size_t row = 0; row < original.rowCount(); ++row) {
     expectEventEquals(restored.row(row), original.row(row));
   }
-  EXPECT_EQ(emberdb::kFootballEventFileFormatVersion, 1U);
+  EXPECT_EQ(emberdb::kFootballEventFileFormatVersion, 2U);
 }
 
 TEST(FootballEventFileTest, RoundTripsAnEmptyTable) {
@@ -123,7 +129,7 @@ TEST(FootballEventFileTest, RejectsUnsupportedFormatVersions) {
   emberdb::saveFootballEventTable(tableWithCompleteAndNullRows(), file.path());
   std::fstream stream(file.path(), std::ios::binary | std::ios::in | std::ios::out);
   stream.seekp(8);
-  const char version[] = {2, 0};
+  const char version[] = {3, 0};
   stream.write(version, 2);
   stream.close();
 

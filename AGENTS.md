@@ -13,7 +13,7 @@ The intended flow is:
 - Provider-specific parsing belongs under `ingestion`; storage and future query code must never depend on raw StatsBomb JSON.
 - `FootballEvent` is the provider-independent interchange model.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
-- Coordinates currently retain the source-provider scale. A future normalization layer should convert them to a documented common pitch coordinate system.
+- Normalized coordinates use EmberDB's 0–100 by 0–100 pitch with attacks running left to right. Preserve provider coordinates in the `source_*` columns and validate bounds in each adapter.
 - Keep components small and owned through values or RAII. Avoid global mutable state.
 - Do not add SQL, persistence, compression, multithreading, SIMD, memory mapping, new providers, web services, or cloud infrastructure until a milestone requires them.
 - Add an abstraction only when it serves current behavior or an imminent extension point.
@@ -57,7 +57,7 @@ Run a typed fixture query with:
 ```bash
 ./build/emberdb_cli query --provider statsbomb --match-id 12345 \
   --input tests/fixtures/complete_events.json --filter event_type=Pass \
-  --project player_name,minute,start_x,start_y
+  --project player_name,minute,start_x,start_y,source_start_x,source_start_y
 ```
 
 Run a grouped fixture aggregation with:
@@ -74,7 +74,7 @@ Persist and query a normalized fixture database with:
 ./build/emberdb_cli import --provider statsbomb --match-id 12345 \
   --input tests/fixtures/complete_events.json --output match.ember
 ./build/emberdb_cli query --database match.ember --filter event_type=Pass \
-  --project player_name,minute,start_x,start_y
+  --project player_name,minute,start_x,start_y,source_start_x,source_start_y
 ```
 
 ## Documentation discipline

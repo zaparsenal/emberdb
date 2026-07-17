@@ -7,7 +7,7 @@
 
 namespace emberdb {
 
-inline constexpr std::uint16_t kFootballEventFileFormatVersion = 1;
+inline constexpr std::uint16_t kFootballEventFileFormatVersion = 2;
 
 void saveFootballEventTable(const FootballEventTable& table,
                             const std::filesystem::path& path);

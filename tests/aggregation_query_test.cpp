@@ -29,7 +29,9 @@ emberdb::FootballEvent event(std::string id, std::string type,
                                 std::nullopt,
                                 start,
                                 std::nullopt,
-                                "StatsBomb"};
+                                "StatsBomb",
+                                std::nullopt,
+                                std::nullopt};
 }
 
 emberdb::FootballEventTable table() {

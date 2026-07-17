@@ -1,11 +1,28 @@
 #include "emberdb/storage/football_event_table.h"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
+
+#include "emberdb/common/coordinate_normalization.h"
 
 namespace emberdb {
 
 void FootballEventTable::append(const FootballEvent& event) {
+  if (event.start_location) {
+    validateCanonicalCoordinate(*event.start_location);
+  }
+  if (event.end_location) {
+    validateCanonicalCoordinate(*event.end_location);
+  }
+  const auto validate_source = [](const std::optional<Coordinate>& coordinate) {
+    if (coordinate &&
+        (!std::isfinite(coordinate->x) || !std::isfinite(coordinate->y))) {
+      throw std::invalid_argument("Source coordinate values must be finite");
+    }
+  };
+  validate_source(event.source_start_location);
+  validate_source(event.source_end_location);
   provider_event_ids_.push_back(event.provider_event_id);
   match_ids_.push_back(event.match_id);
   periods_.push_back(event.period);
@@ -28,6 +45,18 @@ void FootballEventTable::append(const FootballEvent& event) {
   end_y_values_.push_back(event.end_location ? std::optional{event.end_location->y}
                                              : std::nullopt);
   providers_.push_back(event.provider);
+  source_start_x_values_.push_back(
+      event.source_start_location ? std::optional{event.source_start_location->x}
+                                  : std::nullopt);
+  source_start_y_values_.push_back(
+      event.source_start_location ? std::optional{event.source_start_location->y}
+                                  : std::nullopt);
+  source_end_x_values_.push_back(
+      event.source_end_location ? std::optional{event.source_end_location->x}
+                                : std::nullopt);
+  source_end_y_values_.push_back(
+      event.source_end_location ? std::optional{event.source_end_location->y}
+                                : std::nullopt);
 }
 
 std::size_t FootballEventTable::rowCount() const noexcept { return provider_event_ids_.size(); }
@@ -42,7 +71,10 @@ bool FootballEventTable::validate() const noexcept {
          event_types_.size() == expected && outcomes_.size() == expected &&
          start_x_values_.size() == expected && start_y_values_.size() == expected &&
          end_x_values_.size() == expected && end_y_values_.size() == expected &&
-         providers_.size() == expected;
+         providers_.size() == expected && source_start_x_values_.size() == expected &&
+         source_start_y_values_.size() == expected &&
+         source_end_x_values_.size() == expected &&
+         source_end_y_values_.size() == expected;
 }
 
 FootballEvent FootballEventTable::row(std::size_t index) const {
@@ -70,7 +102,11 @@ FootballEvent FootballEventTable::row(std::size_t index) const {
                        outcomes_[index],
                        coordinate(start_x_values_[index], start_y_values_[index]),
                        coordinate(end_x_values_[index], end_y_values_[index]),
-                       providers_[index]};
+                       providers_[index],
+                       coordinate(source_start_x_values_[index],
+                                  source_start_y_values_[index]),
+                       coordinate(source_end_x_values_[index],
+                                  source_end_y_values_[index])};
 }
 
 FootballEventCell FootballEventTable::cell(FootballEventColumn column,
@@ -122,6 +158,14 @@ FootballEventCell FootballEventTable::cell(FootballEventColumn column,
       return nullable(end_y_values_[index]);
     case FootballEventColumn::Provider:
       return FootballEventValue{providers_[index]};
+    case FootballEventColumn::SourceStartX:
+      return nullable(source_start_x_values_[index]);
+    case FootballEventColumn::SourceStartY:
+      return nullable(source_start_y_values_[index]);
+    case FootballEventColumn::SourceEndX:
+      return nullable(source_end_x_values_[index]);
+    case FootballEventColumn::SourceEndY:
+      return nullable(source_end_y_values_[index]);
   }
   throw std::invalid_argument("Unknown FootballEventColumn");
 }

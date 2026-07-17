@@ -36,6 +36,8 @@ constexpr std::array<FootballEventColumn, FootballEventTable::kColumnCount> kCol
     FootballEventColumn::Outcome,         FootballEventColumn::StartX,
     FootballEventColumn::StartY,          FootballEventColumn::EndX,
     FootballEventColumn::EndY,            FootballEventColumn::Provider,
+    FootballEventColumn::SourceStartX,    FootballEventColumn::SourceStartY,
+    FootballEventColumn::SourceEndX,      FootballEventColumn::SourceEndY,
 };
 
 enum class PhysicalType : std::uint8_t {
@@ -511,7 +513,7 @@ void saveFootballEventTable(const FootballEventTable& table,
 FootballEventTable loadFootballEventTable(const std::filesystem::path& path) {
   const auto file = readFile(path);
   if (file.size() < kHeaderSize) {
-    invalidFile(path, "file is smaller than the version 1 header");
+    invalidFile(path, "file is smaller than the version 2 header");
   }
   Cursor header(path, file);
   if (!std::ranges::equal(header.readBytes(kMagic.size(), "magic"), kMagic)) {
@@ -623,38 +625,61 @@ FootballEventTable loadFootballEventTable(const std::filesystem::path& path) {
                                              FootballEventColumn::EndX);
     const auto end_y = optionalValue<double>(path, columns[16], row,
                                              FootballEventColumn::EndY);
+    const auto source_start_x = optionalValue<double>(
+        path, columns[18], row, FootballEventColumn::SourceStartX);
+    const auto source_start_y = optionalValue<double>(
+        path, columns[19], row, FootballEventColumn::SourceStartY);
+    const auto source_end_x = optionalValue<double>(
+        path, columns[20], row, FootballEventColumn::SourceEndX);
+    const auto source_end_y = optionalValue<double>(
+        path, columns[21], row, FootballEventColumn::SourceEndY);
     if (start_x.has_value() != start_y.has_value() ||
-        end_x.has_value() != end_y.has_value()) {
+        end_x.has_value() != end_y.has_value() ||
+        source_start_x.has_value() != source_start_y.has_value() ||
+        source_end_x.has_value() != source_end_y.has_value()) {
       invalidFile(path, "coordinate column nullability is inconsistent at row " +
                             std::to_string(row));
     }
-    table.append(FootballEvent{
-        requiredValue<std::string>(path, columns[0], row,
-                                   FootballEventColumn::ProviderEventId),
-        requiredValue<Identifier>(path, columns[1], row, FootballEventColumn::MatchId),
-        requiredValue<std::int32_t>(path, columns[2], row, FootballEventColumn::Period),
-        {requiredValue<std::chrono::milliseconds>(path, columns[3], row,
-                                                  FootballEventColumn::Timestamp),
-         requiredValue<std::int32_t>(path, columns[4], row,
-                                     FootballEventColumn::Minute),
-         requiredValue<std::int32_t>(path, columns[5], row,
-                                     FootballEventColumn::Second)},
-        optionalValue<Identifier>(path, columns[6], row,
-                                  FootballEventColumn::PossessionId),
-        optionalValue<Identifier>(path, columns[7], row, FootballEventColumn::TeamId),
-        optionalValue<std::string>(path, columns[8], row,
-                                   FootballEventColumn::TeamName),
-        optionalValue<Identifier>(path, columns[9], row, FootballEventColumn::PlayerId),
-        optionalValue<std::string>(path, columns[10], row,
-                                   FootballEventColumn::PlayerName),
-        requiredValue<std::string>(path, columns[11], row,
-                                   FootballEventColumn::EventType),
-        optionalValue<std::string>(path, columns[12], row,
-                                   FootballEventColumn::Outcome),
-        start_x ? std::optional<Coordinate>{{*start_x, *start_y}} : std::nullopt,
-        end_x ? std::optional<Coordinate>{{*end_x, *end_y}} : std::nullopt,
-        requiredValue<std::string>(path, columns[17], row,
-                                   FootballEventColumn::Provider)});
+    try {
+      table.append(FootballEvent{
+          requiredValue<std::string>(path, columns[0], row,
+                                     FootballEventColumn::ProviderEventId),
+          requiredValue<Identifier>(path, columns[1], row,
+                                    FootballEventColumn::MatchId),
+          requiredValue<std::int32_t>(path, columns[2], row,
+                                      FootballEventColumn::Period),
+          {requiredValue<std::chrono::milliseconds>(
+               path, columns[3], row, FootballEventColumn::Timestamp),
+           requiredValue<std::int32_t>(path, columns[4], row,
+                                       FootballEventColumn::Minute),
+           requiredValue<std::int32_t>(path, columns[5], row,
+                                       FootballEventColumn::Second)},
+          optionalValue<Identifier>(path, columns[6], row,
+                                    FootballEventColumn::PossessionId),
+          optionalValue<Identifier>(path, columns[7], row,
+                                    FootballEventColumn::TeamId),
+          optionalValue<std::string>(path, columns[8], row,
+                                     FootballEventColumn::TeamName),
+          optionalValue<Identifier>(path, columns[9], row,
+                                    FootballEventColumn::PlayerId),
+          optionalValue<std::string>(path, columns[10], row,
+                                     FootballEventColumn::PlayerName),
+          requiredValue<std::string>(path, columns[11], row,
+                                     FootballEventColumn::EventType),
+          optionalValue<std::string>(path, columns[12], row,
+                                     FootballEventColumn::Outcome),
+          start_x ? std::optional<Coordinate>{{*start_x, *start_y}} : std::nullopt,
+          end_x ? std::optional<Coordinate>{{*end_x, *end_y}} : std::nullopt,
+          requiredValue<std::string>(path, columns[17], row,
+                                     FootballEventColumn::Provider),
+          source_start_x ? std::optional<Coordinate>{{*source_start_x, *source_start_y}}
+                         : std::nullopt,
+          source_end_x ? std::optional<Coordinate>{{*source_end_x, *source_end_y}}
+                       : std::nullopt});
+    } catch (const std::invalid_argument& error) {
+      invalidFile(path, "invalid coordinate at row " + std::to_string(row) + ": " +
+                            error.what());
+    }
   }
   if (!table.validate()) {
     invalidFile(path, "loaded column lengths are inconsistent");

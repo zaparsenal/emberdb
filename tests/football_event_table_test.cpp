@@ -1,6 +1,7 @@
 #include "emberdb/storage/football_event_table.h"
 
 #include <chrono>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 
@@ -22,7 +23,9 @@ emberdb::FootballEvent completeEvent() {
                                 "Complete",
                                 emberdb::Coordinate{1.5, 2.5},
                                 emberdb::Coordinate{3.5, 4.5},
-                                "StatsBomb"};
+                                "StatsBomb",
+                                emberdb::Coordinate{1.8, 2.8},
+                                emberdb::Coordinate{3.8, 4.8}};
 }
 
 TEST(FootballEventTableTest, AppendsRowsAndKeepsColumnLengthsConsistent) {
@@ -52,6 +55,8 @@ TEST(FootballEventTableTest, RoundTripsTypedValues) {
   EXPECT_EQ(restored.player_id, original.player_id);
   EXPECT_EQ(restored.start_location, original.start_location);
   EXPECT_EQ(restored.end_location, original.end_location);
+  EXPECT_EQ(restored.source_start_location, original.source_start_location);
+  EXPECT_EQ(restored.source_end_location, original.source_end_location);
 }
 
 TEST(FootballEventTableTest, PreservesNullColumns) {
@@ -62,6 +67,8 @@ TEST(FootballEventTableTest, PreservesNullColumns) {
   event.outcome.reset();
   event.start_location.reset();
   event.end_location.reset();
+  event.source_start_location.reset();
+  event.source_end_location.reset();
 
   emberdb::FootballEventTable table;
   table.append(event);
@@ -73,12 +80,28 @@ TEST(FootballEventTableTest, PreservesNullColumns) {
   EXPECT_FALSE(restored.outcome);
   EXPECT_FALSE(restored.start_location);
   EXPECT_FALSE(restored.end_location);
+  EXPECT_FALSE(restored.source_start_location);
+  EXPECT_FALSE(restored.source_end_location);
   EXPECT_EQ(table.playerDataCount(), 0U);
 }
 
 TEST(FootballEventTableTest, RejectsOutOfRangeRows) {
   const emberdb::FootballEventTable table;
   EXPECT_THROW(static_cast<void>(table.row(0)), std::out_of_range);
+}
+
+TEST(FootballEventTableTest, RejectsInvalidCanonicalAndSourceCoordinates) {
+  auto invalid_canonical = completeEvent();
+  invalid_canonical.start_location = emberdb::Coordinate{100.1, 50.0};
+  emberdb::FootballEventTable table;
+  EXPECT_THROW(table.append(invalid_canonical), std::invalid_argument);
+  EXPECT_EQ(table.rowCount(), 0U);
+
+  auto invalid_source = completeEvent();
+  invalid_source.source_start_location = emberdb::Coordinate{
+      std::numeric_limits<double>::infinity(), 40.0};
+  EXPECT_THROW(table.append(invalid_source), std::invalid_argument);
+  EXPECT_EQ(table.rowCount(), 0U);
 }
 
 }  // namespace

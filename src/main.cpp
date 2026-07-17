@@ -316,7 +316,9 @@ void printPreview(const emberdb::FootballEventTable& table, std::size_t limit) {
               << " team=" << optionalText(event.team_name)
               << " player=" << optionalText(event.player_name)
               << " start=" << coordinateText(event.start_location)
-              << " end=" << coordinateText(event.end_location) << '\n';
+              << " end=" << coordinateText(event.end_location)
+              << " source_start=" << coordinateText(event.source_start_location)
+              << " source_end=" << coordinateText(event.source_end_location) << '\n';
   }
 }
 

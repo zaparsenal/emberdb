@@ -26,8 +26,9 @@ struct MatchTime {
   bool operator==(const MatchTime&) const = default;
 };
 
-// Provider-independent normalized event. Coordinates currently remain on the
-// provider's scale; provider records which interpretation applies.
+// Provider-independent normalized event. start_location and end_location use
+// EmberDB's canonical 0..100 pitch with attacks running left to right. Source
+// locations preserve provider values; provider identifies their coordinate system.
 struct FootballEvent {
   std::string provider_event_id;
   Identifier match_id{};
@@ -43,6 +44,8 @@ struct FootballEvent {
   std::optional<Coordinate> start_location;
   std::optional<Coordinate> end_location;
   std::string provider;
+  std::optional<Coordinate> source_start_location;
+  std::optional<Coordinate> source_end_location;
 };
 
 }  // namespace emberdb

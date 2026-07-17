@@ -18,6 +18,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(emberdb
+  src/common/coordinate_normalization.cpp
   src/common/football_event_column.cpp
   src/ingestion/statsbomb_event_adapter.cpp
   src/query/aggregation_query.cpp
@@ -59,6 +60,7 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/coordinate_normalization_test.cpp
     tests/football_event_file_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
@@ -80,10 +82,10 @@ if(BUILD_TESTING)
       --match-id 12345
       --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
       --filter event_type=Pass
-      --project player_name,minute,start_x,start_y
+      --project player_name,minute,start_x,start_y,source_start_x,source_start_y
   )
   set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
-    PASS_REGULAR_EXPRESSION "Matched 1 event"
+    PASS_REGULAR_EXPRESSION "35.4167"
   )
 
   add_test(
@@ -150,11 +152,11 @@ if(BUILD_TESTING)
     COMMAND emberdb_cli query
       --database ${EMBERDB_CLI_TEST_DATABASE}
       --filter event_type=Pass
-      --project player_name,minute,start_x,start_y
+      --project player_name,minute,start_x,start_y,source_start_x,source_start_y
   )
   set_tests_properties(EmberDbCliPersistenceTest.QueriesDatabase PROPERTIES
     DEPENDS EmberDbCliPersistenceTest.ImportsDatabase
-    PASS_REGULAR_EXPRESSION "Matched 1 event"
+    PASS_REGULAR_EXPRESSION "35.4167"
   )
   add_test(
     NAME EmberDbCliPersistenceTest.AggregatesDatabase

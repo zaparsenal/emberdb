@@ -42,10 +42,20 @@ TEST(StatsBombEventAdapterTest, LoadsStartAndPassOrCarryEndCoordinates) {
   ASSERT_EQ(events.size(), 2U);
   ASSERT_TRUE(events[0].start_location);
   ASSERT_TRUE(events[0].end_location);
-  EXPECT_EQ(*events[0].start_location, (emberdb::Coordinate{42.5, 31.25}));
-  EXPECT_EQ(*events[0].end_location, (emberdb::Coordinate{71.0, 22.5}));
+  ASSERT_TRUE(events[0].source_start_location);
+  ASSERT_TRUE(events[0].source_end_location);
+  EXPECT_DOUBLE_EQ(events[0].start_location->x, 42.5 / 120.0 * 100.0);
+  EXPECT_DOUBLE_EQ(events[0].start_location->y, 31.25 / 80.0 * 100.0);
+  EXPECT_DOUBLE_EQ(events[0].end_location->x, 71.0 / 120.0 * 100.0);
+  EXPECT_DOUBLE_EQ(events[0].end_location->y, 22.5 / 80.0 * 100.0);
+  EXPECT_EQ(*events[0].source_start_location,
+            (emberdb::Coordinate{42.5, 31.25}));
+  EXPECT_EQ(*events[0].source_end_location, (emberdb::Coordinate{71.0, 22.5}));
   ASSERT_TRUE(events[1].end_location);
-  EXPECT_EQ(*events[1].end_location, (emberdb::Coordinate{78.0, 29.0}));
+  ASSERT_TRUE(events[1].source_end_location);
+  EXPECT_DOUBLE_EQ(events[1].end_location->x, 78.0 / 120.0 * 100.0);
+  EXPECT_DOUBLE_EQ(events[1].end_location->y, 29.0 / 80.0 * 100.0);
+  EXPECT_EQ(*events[1].source_end_location, (emberdb::Coordinate{78.0, 29.0}));
 }
 
 TEST(StatsBombEventAdapterTest, PreservesNullsForMissingOptionalFieldsAndPlayer) {
@@ -60,6 +70,25 @@ TEST(StatsBombEventAdapterTest, PreservesNullsForMissingOptionalFieldsAndPlayer)
   EXPECT_FALSE(event.outcome);
   EXPECT_FALSE(event.start_location);
   EXPECT_FALSE(event.end_location);
+  EXPECT_FALSE(event.source_start_location);
+  EXPECT_FALSE(event.source_end_location);
+}
+
+TEST(StatsBombEventAdapterTest, RejectsCoordinatesOutsideStatsBombPitchBounds) {
+  const emberdb::StatsBombEventAdapter adapter;
+  EXPECT_THROW(
+      {
+        try {
+          static_cast<void>(adapter.loadEvents(fixture("invalid_coordinates.json"), {1}));
+        } catch (const std::runtime_error& error) {
+          const std::string message(error.what());
+          EXPECT_NE(message.find("index 0"), std::string::npos);
+          EXPECT_NE(message.find("location"), std::string::npos);
+          EXPECT_NE(message.find("120"), std::string::npos);
+          throw;
+        }
+      },
+      std::runtime_error);
 }
 
 TEST(StatsBombEventAdapterTest, RejectsInvalidJsonWithFileContext) {
