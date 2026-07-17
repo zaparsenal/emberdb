@@ -178,4 +178,34 @@ CanonicalEventIdentity CanonicalIdentityCatalog::resolveEvent(
   return result;
 }
 
+const std::map<CanonicalTeamId, CanonicalTeam>&
+CanonicalIdentityCatalog::teams() const noexcept {
+  return teams_;
+}
+
+const std::map<CanonicalPlayerId, CanonicalPlayer>&
+CanonicalIdentityCatalog::players() const noexcept {
+  return players_;
+}
+
+const std::map<CanonicalMatchId, CanonicalMatch>&
+CanonicalIdentityCatalog::matches() const noexcept {
+  return matches_;
+}
+
+const std::map<ProviderTeamReference, CanonicalTeamId>&
+CanonicalIdentityCatalog::teamMappings() const noexcept {
+  return team_mappings_;
+}
+
+const std::map<ProviderPlayerReference, CanonicalPlayerId>&
+CanonicalIdentityCatalog::playerMappings() const noexcept {
+  return player_mappings_;
+}
+
+const std::map<ProviderMatchReference, CanonicalMatchId>&
+CanonicalIdentityCatalog::matchMappings() const noexcept {
+  return match_mappings_;
+}
+
 }  // namespace emberdb

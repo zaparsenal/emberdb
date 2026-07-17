@@ -113,6 +113,19 @@ class CanonicalIdentityCatalog {
   [[nodiscard]] CanonicalEventIdentity resolveEvent(
       const FootballEvent& event) const;
 
+  [[nodiscard]] const std::map<CanonicalTeamId, CanonicalTeam>& teams() const
+      noexcept;
+  [[nodiscard]] const std::map<CanonicalPlayerId, CanonicalPlayer>& players() const
+      noexcept;
+  [[nodiscard]] const std::map<CanonicalMatchId, CanonicalMatch>& matches() const
+      noexcept;
+  [[nodiscard]] const std::map<ProviderTeamReference, CanonicalTeamId>&
+  teamMappings() const noexcept;
+  [[nodiscard]] const std::map<ProviderPlayerReference, CanonicalPlayerId>&
+  playerMappings() const noexcept;
+  [[nodiscard]] const std::map<ProviderMatchReference, CanonicalMatchId>&
+  matchMappings() const noexcept;
+
  private:
   std::map<CanonicalTeamId, CanonicalTeam> teams_;
   std::map<CanonicalPlayerId, CanonicalPlayer> players_;
