@@ -7,8 +7,8 @@ EmberDB is a local columnar analytics engine specialized for football event data
 Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
-- a provider adapter interface with StatsBomb Open Data JSON and Metrica Sports CSV
-  adapters;
+- a provider adapter interface with StatsBomb Open Data JSON, Metrica Sports CSV, and
+  the open Wyscout research JSON adapters;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
@@ -32,6 +32,8 @@ are not implemented.
 StatsBomb JSON --> StatsBombEventAdapter --> validation/normalization --+
                                                                     |
 Metrica CSV ----> MetricaEventAdapter ----> validation/normalization --+
+                                                                    |
+Wyscout JSON ---> WyscoutEventAdapter ---> validation/normalization --+
                                                                     |
                                                                     v
 provider-independent FootballEvent values (import once)
@@ -107,8 +109,8 @@ Preview
 ```
 
 `--match-id` is required because source event files do not always carry usable match
-context. Provider names are selected case-sensitively; `statsbomb` and `metrica` are
-accepted.
+context. Provider names are selected case-sensitively; `statsbomb`, `metrica`, and
+`wyscout` are accepted.
 
 Import Metrica's standard event CSV:
 
@@ -126,6 +128,21 @@ share one home-team first-half direction. The required direction option is there
 explicit import metadata; EmberDB does not guess it from shots, kickoff events, or player
 positions. Accepted values are `left-to-right` and `right-to-left`. The option is invalid
 for providers whose files already express attacking direction.
+
+Import one match from an open Wyscout competition event file:
+
+```bash
+./build/emberdb_cli import \
+  --provider wyscout \
+  --match-id 2576335 \
+  --input events_Italy.json \
+  --output match-2576335.ember
+```
+
+The open Wyscout files contain an entire competition, so the adapter selects only events
+whose `matchId` equals `--match-id`. It fails if the file contains no events for that
+match. The adapter targets the CC BY 4.0 Soccer match event dataset published on Figshare,
+not Wyscout's current commercial API.
 
 Import once into an EmberDB database:
 
@@ -275,6 +292,15 @@ Metrica `PASS` and a StatsBomb `Pass` can both be queried as `event_type=Pass`. 
 provider subtype is retained in `outcome` because the current normalized model has no
 separate subtype column.
 
+The open Wyscout research export already uses a 0–100 pitch from the attacking team's
+perspective, so canonical and source coordinates are equal. Its numeric event, match,
+team, and player identifiers map directly into the normalized model; a documented
+`playerId` of zero is treated as missing. Since names live in separate dataset files,
+team and player names remain null in this event-only adapter. `eventSec` is retained as
+period-relative milliseconds, while `minute` is derived with regulation and extra-time
+period offsets. Tag 1801 maps to the normalized outcome `Accurate`; other tags are not
+guessed into outcome values.
+
 `source_start_x`, `source_start_y`, `source_end_x`, and `source_end_y` retain the exact
 provider coordinates. Together with `provider`, they identify how each normalized value
 was produced. Missing source locations produce missing normalized and source columns.
@@ -294,6 +320,8 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - Only one event source file and one explicit match ID can be imported per invocation.
 - Metrica's standard CSV adapter does not yet read its newer Game 3 JSON/FIFA package,
   tracking data, team sheets, or player metadata.
+- The Wyscout adapter reads the open 2019 research export only and does not join the
+  separate player, team, or match metadata files.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction

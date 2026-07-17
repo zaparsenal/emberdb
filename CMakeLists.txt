@@ -22,6 +22,7 @@ add_library(emberdb
   src/common/football_event_column.cpp
   src/ingestion/metrica_event_adapter.cpp
   src/ingestion/statsbomb_event_adapter.cpp
+  src/ingestion/wyscout_event_adapter.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
   src/storage/football_event_file.cpp
@@ -65,6 +66,7 @@ if(BUILD_TESTING)
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
     tests/statsbomb_event_adapter_test.cpp
+    tests/wyscout_event_adapter_test.cpp
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
   )
@@ -116,6 +118,19 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.ImportsAndQueriesMetricaFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Metrica"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.ImportsAndQueriesWyscoutFixture
+    COMMAND emberdb_cli query
+      --provider wyscout
+      --match-id 2576335
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wyscout_events.json
+      --filter event_type=Pass
+      --project provider,player_id,minute,start_x,start_y,source_start_x,source_start_y
+  )
+  set_tests_properties(EmberDbCliTest.ImportsAndQueriesWyscoutFixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "Wyscout"
   )
 
   add_test(

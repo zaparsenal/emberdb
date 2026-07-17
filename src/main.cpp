@@ -14,6 +14,7 @@
 
 #include "emberdb/ingestion/metrica_event_adapter.h"
 #include "emberdb/ingestion/statsbomb_event_adapter.h"
+#include "emberdb/ingestion/wyscout_event_adapter.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
 #include "emberdb/storage/football_event_file.h"
@@ -184,6 +185,8 @@ emberdb::FootballEventTable importTable(const Options& options) {
     adapter = std::make_unique<emberdb::StatsBombEventAdapter>();
   } else if (options.provider == "metrica") {
     adapter = std::make_unique<emberdb::MetricaEventAdapter>();
+  } else if (options.provider == "wyscout") {
+    adapter = std::make_unique<emberdb::WyscoutEventAdapter>();
   } else {
     throw std::runtime_error("Unsupported provider '" + options.provider + "'");
   }
