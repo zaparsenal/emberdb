@@ -50,6 +50,17 @@ TEST(StatsBombMetadataAdapterTest, LoadsLineupPlayersWithTeamReferences) {
             (emberdb::ProviderTeamReference{"StatsBomb", "10", std::nullopt}));
 }
 
+TEST(StatsBombMetadataAdapterTest, PreservesMissingKickoffAndScores) {
+  const emberdb::StatsBombMetadataAdapter adapter;
+  const auto metadata =
+      adapter.loadMatches(fixture("statsbomb_missing_match_metadata.json"));
+
+  ASSERT_EQ(metadata.matches.size(), 1U);
+  EXPECT_FALSE(metadata.matches[0].kickoff);
+  EXPECT_FALSE(metadata.matches[0].home_score);
+  EXPECT_FALSE(metadata.matches[0].away_score);
+}
+
 TEST(StatsBombMetadataAdapterTest, RejectsInvalidTopLevelWithFileContext) {
   const emberdb::StatsBombMetadataAdapter adapter;
   EXPECT_THROW(

@@ -8,10 +8,16 @@ The intended flow is:
 
 `provider data -> provider adapter -> normalized events -> columnar storage -> query planning -> execution -> terminal/CSV/JSON`
 
+Provider metadata follows a separate path:
+
+`provider metadata -> metadata adapter -> explicit canonical identity mappings -> canonical event identity`
+
 ## Architectural boundaries
 
 - Provider-specific parsing belongs under `ingestion`; storage and future query code must never depend on raw StatsBomb JSON.
 - `FootballEvent` is the provider-independent interchange model.
+- Canonical match, team, and player identity stays separate from provider event fields;
+  mappings must be explicit until a reconciliation milestone defines otherwise.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
 - Normalized coordinates use EmberDB's 0–100 by 0–100 pitch with attacks running left to right. Preserve provider coordinates in the `source_*` columns and validate bounds in each adapter.
 - Keep components small and owned through values or RAII. Avoid global mutable state.
@@ -21,6 +27,7 @@ The intended flow is:
 ## Repository layout
 
 - `include/emberdb/common`: provider-neutral domain types
+- `include/emberdb/identity`, `src/identity`: canonical entity catalogs and mappings
 - `include/emberdb/ingestion`, `src/ingestion`: adapter contracts and implementations
 - `include/emberdb/storage`, `src/storage`: columnar storage
 - `src/main.cpp`: command-line boundary

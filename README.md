@@ -7,8 +7,12 @@ EmberDB is a local columnar analytics engine specialized for football event data
 Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
+- typed `CanonicalMatch`, `CanonicalTeam`, and `CanonicalPlayer` catalogs with
+  provider-to-canonical ID mappings;
 - a provider adapter interface with StatsBomb Open Data JSON, Metrica Sports CSV, and
   the open Wyscout research JSON adapters;
+- metadata adapters for StatsBomb matches/lineups and the open Wyscout competition,
+  team, player, and match catalogs;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
@@ -23,8 +27,8 @@ Implemented milestones include:
   programmatic query APIs; and
 - offline unit fixtures covering ingestion failures, coordinates, nulls, table behavior, and queries.
 
-SQL, compression, broader analytical expressions, and cross-provider entity matching
-are not implemented.
+SQL, compression, broader analytical expressions, automatic cross-provider entity
+matching, and event reconciliation are not implemented.
 
 ## Architecture
 
@@ -50,14 +54,47 @@ typed filters, projections, aggregations, and grouping
         |
         v
 CLI tabular results
+
+StatsBomb match/lineup JSON ---> StatsBombMetadataAdapter --+
+                                                            |
+Wyscout metadata JSON ----------> WyscoutMetadataAdapter ----+--> provider metadata
+                                                            |          |
+explicit provider ID mappings ------------------------------+          v
+                                                    CanonicalIdentityCatalog
+                                                            |
+normalized FootballEvent -----------------------------------+--> canonical event identity
 ```
 
 Raw provider files are confined to ingestion adapters. Storage and query execution
-accept only normalized events and do not depend on StatsBomb or Metrica formats.
+accept only normalized events and do not depend on StatsBomb, Metrica, or Wyscout
+formats.
 
 The current 22 logical columns are provider event ID, match ID, period, timestamp,
 minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
 normalized start x/y, normalized end x/y, provider, source start x/y, and source end x/y.
+
+## Canonical identity catalogs
+
+`CanonicalIdentityCatalog` stores typed canonical match, team, and player records
+separately from provider metadata. A provider identity can map to only one canonical ID,
+while several provider identities may map to the same canonical entity. Conflicting
+remaps and mappings to unknown canonical records are rejected.
+
+StatsBomb metadata ingestion reads competition/season, kickoff, home/away teams, scores,
+and lineup players. Wyscout metadata ingestion reads its separate competition, team,
+player, and match exports. Missing source kickoff, score, or current-team values stay
+optional. The open Wyscout player file's JSON null and literal `"null"` current-team
+representations are both treated as missing.
+
+Metrica has no stable team IDs in its standard anonymized CSV. Call
+`mapMetricaTeams(provider_match_id, home_team_id, away_team_id)` to map its repeating
+`Home` and `Away` labels within one match. They are deliberately never global mappings.
+
+`resolveEvent` returns a `CanonicalEventIdentity` alongside an existing normalized
+event; it does not overwrite the event's provider IDs. The catalog and metadata adapters
+are currently programmatic APIs declared under `include/emberdb/identity` and
+`include/emberdb/ingestion`. Catalog persistence, automatic matching, confidence scores,
+field provenance, and CLI mapping commands are planned rather than implied.
 
 ## Requirements and build
 
@@ -320,15 +357,20 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - Only one event source file and one explicit match ID can be imported per invocation.
 - Metrica's standard CSV adapter does not yet read its newer Game 3 JSON/FIFA package,
   tracking data, team sheets, or player metadata.
-- The Wyscout adapter reads the open 2019 research export only and does not join the
-  separate player, team, or match metadata files.
+- The Wyscout event CLI reads the open 2019 research export only and does not
+  automatically join the separately supported player, team, competition, or match
+  metadata files.
+- Canonical identity catalogs are in-memory programmatic APIs. They are not stored in
+  `.ember` files, and EmberDB does not automatically decide that two provider entities
+  are the same.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is cross-provider entity reconciliation. SQL is
-deliberately deferred; when resumed, it should translate into
-the existing typed filter, projection, aggregation, and grouping operations rather than
-bypassing them.
+The recommended next milestone is deterministic match reconciliation using competition,
+season, kickoff tolerance, canonical home/away teams, and score, with explainable match
+confidence. Fuzzy event reconciliation should remain deferred until match identity is
+stable. SQL is also deliberately deferred; when resumed, it should translate into the
+existing typed operations rather than bypassing them.
