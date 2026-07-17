@@ -9,7 +9,9 @@ Implemented milestones include:
 - a provider-independent, typed `FootballEvent` model;
 - a provider adapter interface and StatsBomb Open Data JSON adapter;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
-- a typed 18-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
+- a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
+- canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
+- preserved provider coordinates for traceability and provider-specific bounds validation;
 - provider-neutral typed equality filters and projections with explicit null results;
 - deterministic query execution that preserves imported event order;
 - typed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregation with optional grouping;
@@ -31,6 +33,9 @@ StatsBomb event JSON
 EventProviderAdapter / StatsBombEventAdapter
         |
         v
+provider-specific coordinate validation and normalization
+        |
+        v
 provider-independent FootballEvent values (import once)
         |
         v
@@ -49,7 +54,9 @@ CLI tabular results
 
 Raw StatsBomb JSON is confined to the adapter. Storage accepts only normalized events, leaving a clean seam for future provider adapters.
 
-The current 18 logical columns are provider event ID, match ID, period, timestamp, minute, second, possession ID, team ID/name, player ID/name, event type, outcome, start x/y, end x/y, and provider.
+The current 22 logical columns are provider event ID, match ID, period, timestamp,
+minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
+normalized start x/y, normalized end x/y, provider, source start x/y, and source end x/y.
 
 ## Requirements and build
 
@@ -90,14 +97,14 @@ Example output:
 Imported 2 events
 Provider: StatsBomb
 Match ID: 12345
-Columns: 18
+Columns: 22
 Events with player data: 2
 Events with start locations: 2
 Events with end locations: 2
 
 Preview
-0: id=evt-pass-1 type=Pass team=Ember FC player=Alex Forward start=(42.500000, 31.250000) end=(71.000000, 22.500000)
-1: id=evt-carry-2 type=Carry team=Ember FC player=Alex Forward start=(71.000000, 22.500000) end=(78.000000, 29.000000)
+0: id=evt-pass-1 type=Pass team=Ember FC player=Alex Forward start=(35.416667, 39.062500) end=(59.166667, 28.125000) source_start=(42.500000, 31.250000) source_end=(71.000000, 22.500000)
+1: id=evt-carry-2 type=Carry team=Ember FC player=Alex Forward start=(59.166667, 28.125000) end=(65.000000, 36.250000) source_start=(71.000000, 22.500000) source_end=(78.000000, 29.000000)
 ```
 
 `--match-id` is required because StatsBomb event files do not reliably include match context in each event. Provider names are selected case-sensitively; currently only `statsbomb` is accepted.
@@ -121,7 +128,7 @@ Query the saved database without reparsing provider JSON:
 ./build/emberdb_cli query \
   --database match.ember \
   --filter event_type=Pass \
-  --project player_name,minute,start_x,start_y
+  --project player_name,minute,start_x,start_y,source_start_x,source_start_y
 ```
 
 `--database` can be used with projection queries and grouped aggregation queries. It is
@@ -135,15 +142,15 @@ Filter and project events:
   --match-id 12345 \
   --input tests/fixtures/complete_events.json \
   --filter event_type=Pass \
-  --project player_name,minute,start_x,start_y
+  --project player_name,minute,start_x,start_y,source_start_x,source_start_y
 ```
 
 Example output (columns are tab-separated):
 
 ```text
 Matched 1 event
-player_name    minute  start_x start_y
-Alex Forward   12      42.5    31.25
+player_name    minute  start_x  start_y  source_start_x  source_start_y
+Alex Forward   12      35.4167  39.0625  42.5            31.25
 ```
 
 `--filter` implements typed equality and may be repeated; repeated filters use `AND`
@@ -154,8 +161,8 @@ order, and duplicate projection columns are rejected.
 
 The stable query column names are: `provider_event_id`, `match_id`, `period`,
 `timestamp`, `minute`, `second`, `possession_id`, `team_id`, `team_name`, `player_id`,
-`player_name`, `event_type`, `outcome`, `start_x`, `start_y`, `end_x`, `end_y`, and
-`provider`.
+`player_name`, `event_type`, `outcome`, `start_x`, `start_y`, `end_x`, `end_y`,
+`provider`, `source_start_x`, `source_start_y`, `source_end_x`, and `source_end_y`.
 
 The query API is declared in `include/emberdb/query/event_query.h`. It accepts typed
 `EqualityPredicate` values rather than strings; the CLI is only a translation boundary.
@@ -177,8 +184,8 @@ Example output (columns are tab-separated):
 ```text
 Result rows: 2
 event_type  count(*)  avg(start_x)
-Pass        1         42.5
-Carry       1         71
+Pass        1         35.4167
+Carry       1         59.1667
 ```
 
 Supported aggregate expressions are `count(*)`, `count(column)`, `sum(column)`,
@@ -197,9 +204,9 @@ The programmatic aggregation API is declared in
 
 ## Persistent file format
 
-Each `.ember` database is one table in one container file. Format version 1 uses a
+Each `.ember` database is one table in one container file. Format version 2 uses a
 fixed little-endian header containing magic bytes, the format version, flags, row count,
-and an 18-entry schema directory. Every directory entry records the stable column ID,
+and a 22-entry schema directory. Every directory entry records the stable column ID,
 physical type, nullability, offsets, sizes, and CRC32 checksums for its null bitmap and
 data payload.
 
@@ -216,11 +223,29 @@ truncated files, corruption, trailing data, and schema mismatches fail with file
 column context. Writes use a temporary sibling and rename only after the complete file
 has been written.
 
+Version 2 adds canonical and source-coordinate columns. Earlier version 1 files are
+rejected rather than guessed or silently migrated; reimport the provider JSON to create
+a version 2 database.
+
 ## Data and coordinate semantics
 
 StatsBomb timestamps are parsed into millisecond durations relative to the event period. The provider's `minute` and `second` fields are also retained as typed values.
 
-Coordinates currently preserve StatsBomb's native pitch scale (normally 120 by 80). They are **not** yet converted to a common coordinate system. The provider field makes this interpretation explicit until a normalization policy is introduced.
+`start_x`, `start_y`, `end_x`, and `end_y` use EmberDB's canonical pitch: both axes
+range from 0 through 100, and the attacking direction runs left to right. The x-axis is
+pitch length and the y-axis is pitch width. Boundaries are inclusive.
+
+The StatsBomb adapter validates its 120 by 80 source pitch and transforms coordinates as
+`x / 120 * 100` and `y / 80 * 100`. StatsBomb event coordinates are treated as already
+oriented from the attacking team's goal toward the opponent's goal, so they require no
+direction flip. A provider whose events attack right to left flips normalized x with
+`100 - x`; normalized y is unchanged.
+
+`source_start_x`, `source_start_y`, `source_end_x`, and `source_end_y` retain the exact
+provider coordinates. Together with `provider`, they identify how each normalized value
+was produced. Missing source locations produce missing normalized and source columns.
+Non-finite or out-of-bounds provider coordinates fail ingestion rather than being
+clamped or silently discarded.
 
 Pass and carry end locations are supported. Outcomes are extracted from common StatsBomb detail objects (`pass`, `shot`, `duel`, `dribble`, and `goalkeeper`) when present.
 
@@ -232,14 +257,15 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
   optimizer, general expression evaluation, or distinct aggregation yet.
 - No compression, dictionary encoding, parallelism, SIMD, or memory mapping is used.
 - Only one event JSON file and one explicit match ID can be imported per invocation.
-- Only StatsBomb is supported, and its coordinate scale is preserved rather than normalized.
+- Only StatsBomb is supported; a second provider must offer a stable, documented, and
+  legitimately obtainable format.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is coordinate normalization into a documented common
-pitch scale, followed by a second provider adapter and cross-provider reconciliation.
-SQL is deliberately deferred; when resumed, it should translate into the existing typed
-filter, projection, aggregation, and grouping operations rather than bypassing them.
+The recommended next milestone is a second provider adapter, followed by cross-provider
+reconciliation. SQL is deliberately deferred; when resumed, it should translate into
+the existing typed filter, projection, aggregation, and grouping operations rather than
+bypassing them.

@@ -82,10 +82,10 @@ if(BUILD_TESTING)
       --match-id 12345
       --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
       --filter event_type=Pass
-      --project player_name,minute,start_x,start_y
+      --project player_name,minute,start_x,start_y,source_start_x,source_start_y
   )
   set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
-    PASS_REGULAR_EXPRESSION "Matched 1 event"
+    PASS_REGULAR_EXPRESSION "35.4167"
   )
 
   add_test(
@@ -152,11 +152,11 @@ if(BUILD_TESTING)
     COMMAND emberdb_cli query
       --database ${EMBERDB_CLI_TEST_DATABASE}
       --filter event_type=Pass
-      --project player_name,minute,start_x,start_y
+      --project player_name,minute,start_x,start_y,source_start_x,source_start_y
   )
   set_tests_properties(EmberDbCliPersistenceTest.QueriesDatabase PROPERTIES
     DEPENDS EmberDbCliPersistenceTest.ImportsDatabase
-    PASS_REGULAR_EXPRESSION "Matched 1 event"
+    PASS_REGULAR_EXPRESSION "35.4167"
   )
   add_test(
     NAME EmberDbCliPersistenceTest.AggregatesDatabase
