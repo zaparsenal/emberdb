@@ -13,6 +13,8 @@ Implemented milestones include:
   the open Wyscout research JSON adapters;
 - metadata adapters for StatsBomb matches/lineups and the open Wyscout competition,
   team, player, and match catalogs;
+- deterministic match reconciliation candidates with per-field provenance, status, and
+  confidence;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
@@ -63,6 +65,7 @@ explicit provider ID mappings ------------------------------+          v
                                                     CanonicalIdentityCatalog
                                                             |
 normalized FootballEvent -----------------------------------+--> canonical event identity
+provider match metadata + canonical team mappings ----------+--> ranked match candidates
 ```
 
 Raw provider files are confined to ingestion adapters. Storage and query execution
@@ -93,8 +96,32 @@ Metrica has no stable team IDs in its standard anonymized CSV. Call
 `resolveEvent` returns a `CanonicalEventIdentity` alongside an existing normalized
 event; it does not overwrite the event's provider IDs. The catalog and metadata adapters
 are currently programmatic APIs declared under `include/emberdb/identity` and
-`include/emberdb/ingestion`. Catalog persistence, automatic matching, confidence scores,
-field provenance, and CLI mapping commands are planned rather than implied.
+`include/emberdb/ingestion`. Catalog persistence, automatic candidate acceptance, and
+CLI mapping commands are planned rather than implied.
+
+## Match reconciliation
+
+`reconcileMatches` compares two provider match records without changing either record or
+adding a canonical mapping. Each comparison retains the left and right provider/value
+and classifies competition, season, kickoff, home team, away team, and score as
+`Missing`, `Agreeing`, `Conflicting`, or `Uncertain`.
+
+Team agreement requires existing provider-to-canonical team mappings. Scores compare
+exactly. Kickoffs agree within five minutes, are uncertain through 24 hours, and conflict
+beyond that by default. Cross-provider competition and season names use only
+case-insensitive, whitespace-normalized equality; unequal names remain uncertain rather
+than being fuzzily guessed. Same-provider IDs compare exactly.
+
+The confidence weights are home team 0.25, away team 0.25, kickoff 0.20, score 0.15,
+competition 0.10, and season 0.05. Agreeing fields receive full weight, uncertain fields
+half weight, and missing or conflicting fields none. The default candidate threshold is
+0.70. Team, kickoff, or score conflicts always disqualify a candidate regardless of its
+numeric score. `findMatchCandidates` returns only qualified candidates, ordered by
+confidence with deterministic provider-ID tie breaking.
+
+This is candidate generation, not automatic acceptance. EmberDB does not create a
+`CanonicalMatch`, overwrite source values, or add match mappings from a reconciliation
+result.
 
 ## Requirements and build
 
@@ -363,14 +390,18 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - Canonical identity catalogs are in-memory programmatic APIs. They are not stored in
   `.ember` files, and EmberDB does not automatically decide that two provider entities
   are the same.
+- Match reconciliation is a programmatic, pairwise candidate generator. There is no
+  persisted review/acceptance workflow, competition mapping catalog, or command-line
+  interface yet.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is deterministic match reconciliation using competition,
-season, kickoff tolerance, canonical home/away teams, and score, with explainable match
-confidence. Fuzzy event reconciliation should remain deferred until match identity is
-stable. SQL is also deliberately deferred; when resumed, it should translate into the
-existing typed operations rather than bypassing them.
+The recommended next milestone is a durable review-and-accept workflow for match
+candidates: persist canonical catalogs and explicit accepted mappings, retain rejected
+or unresolved candidates, and never auto-accept conflicts. Event reconciliation should
+remain deferred until those match decisions survive reloads. SQL is also deliberately
+deferred; when resumed, it should translate into the existing typed operations rather
+than bypassing them.

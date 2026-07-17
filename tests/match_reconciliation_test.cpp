@@ -1,12 +1,20 @@
 #include "emberdb/reconciliation/match_reconciliation.h"
 
+#include "emberdb/ingestion/statsbomb_metadata_adapter.h"
+#include "emberdb/ingestion/wyscout_metadata_adapter.h"
+
 #include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 namespace {
+
+std::filesystem::path fixture(const std::string& name) {
+  return std::filesystem::path(EMBERDB_TEST_FIXTURES_DIR) / name;
+}
 
 emberdb::CanonicalIdentityCatalog catalog() {
   emberdb::CanonicalIdentityCatalog result;
@@ -69,6 +77,27 @@ TEST(MatchReconciliationTest, ProducesExplainableCrossProviderCandidate) {
   EXPECT_EQ(result.score.status, emberdb::ReconciliationStatus::Agreeing);
   EXPECT_EQ(result.competition.status, emberdb::ReconciliationStatus::Uncertain);
   EXPECT_EQ(result.season.status, emberdb::ReconciliationStatus::Missing);
+}
+
+TEST(MatchReconciliationTest, ReconcilesRecordsProducedByMetadataAdapters) {
+  const emberdb::StatsBombMetadataAdapter statsbomb;
+  const emberdb::WyscoutMetadataAdapter wyscout;
+  const auto left = statsbomb.loadMatches(
+      fixture("statsbomb_reconciliation_matches.json"));
+  const auto right = wyscout.loadMatches(fixture("wyscout_matches.json"));
+  auto identities = catalog();
+
+  const auto candidates = emberdb::findMatchCandidates(
+      left.matches, right.matches, identities);
+
+  ASSERT_EQ(candidates.size(), 1U);
+  EXPECT_EQ(candidates[0].left_match.id, "12345");
+  EXPECT_EQ(candidates[0].right_match.id, "2499719");
+  EXPECT_DOUBLE_EQ(candidates[0].confidence, 0.85);
+  EXPECT_EQ(candidates[0].competition.status,
+            emberdb::ReconciliationStatus::Missing);
+  EXPECT_EQ(candidates[0].home_team.canonical_value, "1");
+  EXPECT_EQ(candidates[0].away_team.canonical_value, "2");
 }
 
 TEST(MatchReconciliationTest, DoesNotOverwriteOrAcceptConflictingTeams) {
