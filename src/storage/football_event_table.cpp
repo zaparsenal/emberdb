@@ -73,6 +73,59 @@ FootballEvent FootballEventTable::row(std::size_t index) const {
                        providers_[index]};
 }
 
+FootballEventCell FootballEventTable::cell(FootballEventColumn column,
+                                           std::size_t index) const {
+  if (index >= rowCount()) {
+    throw std::out_of_range("FootballEventTable row index " + std::to_string(index) +
+                            " is out of range");
+  }
+  const auto nullable = [](const auto& value) -> FootballEventCell {
+    if (value) {
+      return FootballEventValue{*value};
+    }
+    return std::nullopt;
+  };
+  switch (column) {
+    case FootballEventColumn::ProviderEventId:
+      return FootballEventValue{provider_event_ids_[index]};
+    case FootballEventColumn::MatchId:
+      return FootballEventValue{match_ids_[index]};
+    case FootballEventColumn::Period:
+      return FootballEventValue{periods_[index]};
+    case FootballEventColumn::Timestamp:
+      return FootballEventValue{timestamps_[index]};
+    case FootballEventColumn::Minute:
+      return FootballEventValue{minutes_[index]};
+    case FootballEventColumn::Second:
+      return FootballEventValue{seconds_[index]};
+    case FootballEventColumn::PossessionId:
+      return nullable(possession_ids_[index]);
+    case FootballEventColumn::TeamId:
+      return nullable(team_ids_[index]);
+    case FootballEventColumn::TeamName:
+      return nullable(team_names_[index]);
+    case FootballEventColumn::PlayerId:
+      return nullable(player_ids_[index]);
+    case FootballEventColumn::PlayerName:
+      return nullable(player_names_[index]);
+    case FootballEventColumn::EventType:
+      return FootballEventValue{event_types_[index]};
+    case FootballEventColumn::Outcome:
+      return nullable(outcomes_[index]);
+    case FootballEventColumn::StartX:
+      return nullable(start_x_values_[index]);
+    case FootballEventColumn::StartY:
+      return nullable(start_y_values_[index]);
+    case FootballEventColumn::EndX:
+      return nullable(end_x_values_[index]);
+    case FootballEventColumn::EndY:
+      return nullable(end_y_values_[index]);
+    case FootballEventColumn::Provider:
+      return FootballEventValue{providers_[index]};
+  }
+  throw std::invalid_argument("Unknown FootballEventColumn");
+}
+
 std::size_t FootballEventTable::playerDataCount() const noexcept {
   return static_cast<std::size_t>(std::count_if(
       player_ids_.begin(), player_ids_.end(), [](const auto& value) { return value.has_value(); }));

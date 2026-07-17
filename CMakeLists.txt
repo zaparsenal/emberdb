@@ -18,7 +18,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(emberdb
+  src/common/football_event_column.cpp
   src/ingestion/statsbomb_event_adapter.cpp
+  src/query/event_query.cpp
   src/storage/football_event_table.cpp
 )
 add_library(EmberDB::emberdb ALIAS emberdb)
@@ -56,6 +58,7 @@ if(BUILD_TESTING)
   add_executable(emberdb_tests
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
+    tests/event_query_test.cpp
   )
   target_link_libraries(emberdb_tests PRIVATE EmberDB::emberdb GTest::gtest_main)
   target_compile_definitions(emberdb_tests PRIVATE
@@ -65,4 +68,17 @@ if(BUILD_TESTING)
 
   include(GoogleTest)
   gtest_discover_tests(emberdb_tests)
+
+  add_test(
+    NAME EmberDbCliTest.FiltersAndProjectsFixture
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --filter event_type=Pass
+      --project player_name,minute,start_x,start_y
+  )
+  set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "Matched 1 event"
+  )
 endif()

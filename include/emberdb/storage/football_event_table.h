@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "emberdb/common/football_event_column.h"
 #include "emberdb/common/football_event.h"
 
 namespace emberdb {
@@ -19,6 +20,8 @@ class FootballEventTable {
   [[nodiscard]] std::size_t rowCount() const noexcept;
   [[nodiscard]] bool validate() const noexcept;
   [[nodiscard]] FootballEvent row(std::size_t index) const;
+  [[nodiscard]] FootballEventCell cell(FootballEventColumn column,
+                                       std::size_t index) const;
 
   [[nodiscard]] std::size_t playerDataCount() const noexcept;
   [[nodiscard]] std::size_t startLocationCount() const noexcept;
