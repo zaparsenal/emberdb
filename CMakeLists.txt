@@ -68,4 +68,17 @@ if(BUILD_TESTING)
 
   include(GoogleTest)
   gtest_discover_tests(emberdb_tests)
+
+  add_test(
+    NAME EmberDbCliTest.FiltersAndProjectsFixture
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --filter event_type=Pass
+      --project player_name,minute,start_x,start_y
+  )
+  set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "Matched 1 event"
+  )
 endif()
