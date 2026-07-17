@@ -60,6 +60,14 @@ Run a typed fixture query with:
   --project player_name,minute,start_x,start_y
 ```
 
+Run a grouped fixture aggregation with:
+
+```bash
+./build/emberdb_cli query --provider statsbomb --match-id 12345 \
+  --input tests/fixtures/complete_events.json --group-by event_type \
+  --aggregate 'count(*)' --aggregate 'avg(start_x)'
+```
+
 ## Documentation discipline
 
 Keep `README.md`, this file, CLI help, tests, and CMake targets synchronized with implementation. Clearly label planned work as planned. When architecture, commands, schema semantics, coordinate conventions, or limitations change, update the relevant documentation in the same change.

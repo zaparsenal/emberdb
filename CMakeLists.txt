@@ -20,6 +20,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_library(emberdb
   src/common/football_event_column.cpp
   src/ingestion/statsbomb_event_adapter.cpp
+  src/query/aggregation_query.cpp
   src/query/event_query.cpp
   src/storage/football_event_table.cpp
 )
@@ -56,6 +57,7 @@ if(BUILD_TESTING)
   FetchContent_MakeAvailable(googletest)
 
   add_executable(emberdb_tests
+    tests/aggregation_query_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
@@ -80,5 +82,44 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Matched 1 event"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.AggregatesAndGroupsFixture
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --aggregate "count(*)"
+      --aggregate "avg(start_x)"
+      --group-by event_type
+  )
+  set_tests_properties(EmberDbCliTest.AggregatesAndGroupsFixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "Result rows: 2"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.RejectsMixedProjectionAndAggregation
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --project event_type
+      --aggregate "count(*)"
+  )
+  set_tests_properties(EmberDbCliTest.RejectsMixedProjectionAndAggregation PROPERTIES
+    WILL_FAIL TRUE
+  )
+
+  add_test(
+    NAME EmberDbCliTest.RejectsTextSum
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --aggregate "sum(event_type)"
+  )
+  set_tests_properties(EmberDbCliTest.RejectsTextSum PROPERTIES
+    WILL_FAIL TRUE
   )
 endif()
