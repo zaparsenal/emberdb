@@ -106,6 +106,23 @@ TEST(AggregationQueryTest, CoalescesNullGroupKeysAndPreservesThem) {
   EXPECT_EQ(std::get<std::uint64_t>(*result.cell(1, 1)), 2U);
 }
 
+TEST(AggregationQueryTest, GroupsByMultipleColumns) {
+  const auto result = emberdb::executeAggregationQuery(
+      table(),
+      {{},
+       {emberdb::FootballEventColumn::EventType,
+        emberdb::FootballEventColumn::PlayerName},
+       {{emberdb::AggregateFunction::Count}}});
+
+  ASSERT_EQ(result.rowCount(), 3U);
+  EXPECT_EQ(std::get<std::string>(*result.cell(0, 0)), "Pass");
+  EXPECT_EQ(std::get<std::string>(*result.cell(0, 1)), "Alex Forward");
+  EXPECT_EQ(std::get<std::string>(*result.cell(1, 0)), "Carry");
+  EXPECT_EQ(std::get<std::string>(*result.cell(1, 1)), "Alex Forward");
+  EXPECT_EQ(std::get<std::string>(*result.cell(2, 0)), "Pass");
+  EXPECT_FALSE(result.cell(2, 1));
+}
+
 TEST(AggregationQueryTest, ReturnsOneGlobalRowForEmptyInput) {
   const emberdb::FootballEventTable empty;
   const auto result = emberdb::executeAggregationQuery(
@@ -154,6 +171,11 @@ TEST(AggregationQueryTest, RejectsInvalidAndDuplicateExpressions) {
            {{emberdb::AggregateFunction::Count},
             {emberdb::AggregateFunction::Count}}})),
       std::invalid_argument);
+}
+
+TEST(AggregationQueryTest, RejectsInconsistentResultRows) {
+  EXPECT_THROW((emberdb::AggregationResult{{"count(*)"}, {{}}}),
+               std::invalid_argument);
 }
 
 }  // namespace
