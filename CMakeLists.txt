@@ -22,6 +22,7 @@ add_library(emberdb
   src/ingestion/statsbomb_event_adapter.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
+  src/storage/football_event_file.cpp
   src/storage/football_event_table.cpp
 )
 add_library(EmberDB::emberdb ALIAS emberdb)
@@ -58,6 +59,7 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/football_event_file_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
@@ -121,5 +123,57 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.RejectsTextSum PROPERTIES
     WILL_FAIL TRUE
+  )
+
+  set(EMBERDB_CLI_TEST_DATABASE
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-persistence-test.ember")
+  add_test(
+    NAME EmberDbCliPersistenceTest.PreparesOutput
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_TEST_DATABASE}
+      ${EMBERDB_CLI_TEST_DATABASE}.tmp
+  )
+  add_test(
+    NAME EmberDbCliPersistenceTest.ImportsDatabase
+    COMMAND emberdb_cli import
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --output ${EMBERDB_CLI_TEST_DATABASE}
+  )
+  set_tests_properties(EmberDbCliPersistenceTest.ImportsDatabase PROPERTIES
+    DEPENDS EmberDbCliPersistenceTest.PreparesOutput
+    PASS_REGULAR_EXPRESSION "Saved database:"
+  )
+  add_test(
+    NAME EmberDbCliPersistenceTest.QueriesDatabase
+    COMMAND emberdb_cli query
+      --database ${EMBERDB_CLI_TEST_DATABASE}
+      --filter event_type=Pass
+      --project player_name,minute,start_x,start_y
+  )
+  set_tests_properties(EmberDbCliPersistenceTest.QueriesDatabase PROPERTIES
+    DEPENDS EmberDbCliPersistenceTest.ImportsDatabase
+    PASS_REGULAR_EXPRESSION "Matched 1 event"
+  )
+  add_test(
+    NAME EmberDbCliPersistenceTest.AggregatesDatabase
+    COMMAND emberdb_cli query
+      --database ${EMBERDB_CLI_TEST_DATABASE}
+      --group-by event_type
+      --aggregate "count(*)"
+  )
+  set_tests_properties(EmberDbCliPersistenceTest.AggregatesDatabase PROPERTIES
+    DEPENDS EmberDbCliPersistenceTest.ImportsDatabase
+    PASS_REGULAR_EXPRESSION "Result rows: 2"
+  )
+  add_test(
+    NAME EmberDbCliPersistenceTest.CleansOutput
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_TEST_DATABASE}
+      ${EMBERDB_CLI_TEST_DATABASE}.tmp
+  )
+  set_tests_properties(EmberDbCliPersistenceTest.CleansOutput PROPERTIES
+    DEPENDS "EmberDbCliPersistenceTest.QueriesDatabase;EmberDbCliPersistenceTest.AggregatesDatabase"
   )
 endif()

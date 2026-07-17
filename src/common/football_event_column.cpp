@@ -89,6 +89,32 @@ FootballEventValueType valueType(const FootballEventValue& value) noexcept {
       value);
 }
 
+bool columnIsNullable(FootballEventColumn column) noexcept {
+  switch (column) {
+    case FootballEventColumn::PossessionId:
+    case FootballEventColumn::TeamId:
+    case FootballEventColumn::TeamName:
+    case FootballEventColumn::PlayerId:
+    case FootballEventColumn::PlayerName:
+    case FootballEventColumn::Outcome:
+    case FootballEventColumn::StartX:
+    case FootballEventColumn::StartY:
+    case FootballEventColumn::EndX:
+    case FootballEventColumn::EndY:
+      return true;
+    case FootballEventColumn::ProviderEventId:
+    case FootballEventColumn::MatchId:
+    case FootballEventColumn::Period:
+    case FootballEventColumn::Timestamp:
+    case FootballEventColumn::Minute:
+    case FootballEventColumn::Second:
+    case FootballEventColumn::EventType:
+    case FootballEventColumn::Provider:
+      return false;
+  }
+  return false;
+}
+
 std::optional<FootballEventColumn> columnFromName(std::string_view name) noexcept {
   for (const auto& [column, candidate] : kColumnNames) {
     if (candidate == name) {
