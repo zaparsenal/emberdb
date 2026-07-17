@@ -177,7 +177,9 @@ double statusFactor(ReconciliationStatus status) {
 }
 
 bool isHardConflict(const MatchReconciliation& result) {
-  return result.home_team.status == ReconciliationStatus::Conflicting ||
+  return result.competition.status == ReconciliationStatus::Conflicting ||
+         result.season.status == ReconciliationStatus::Conflicting ||
+         result.home_team.status == ReconciliationStatus::Conflicting ||
          result.away_team.status == ReconciliationStatus::Conflicting ||
          result.kickoff.status == ReconciliationStatus::Conflicting ||
          result.score.status == ReconciliationStatus::Conflicting;
@@ -203,6 +205,14 @@ MatchReconciliation reconcileMatches(
       teamEvidence(left, right, left.home_team, right.home_team, catalog);
   result.away_team =
       teamEvidence(left, right, left.away_team, right.away_team, catalog);
+  if (result.home_team.status == ReconciliationStatus::Agreeing &&
+      result.away_team.status == ReconciliationStatus::Agreeing &&
+      result.home_team.canonical_value == result.away_team.canonical_value) {
+    result.home_team.status = ReconciliationStatus::Conflicting;
+    result.away_team.status = ReconciliationStatus::Conflicting;
+    result.home_team.canonical_value.reset();
+    result.away_team.canonical_value.reset();
+  }
   result.score = scoreEvidence(left, right);
   result.confidence =
       kHomeTeamWeight * statusFactor(result.home_team.status) +

@@ -115,9 +115,10 @@ than being fuzzily guessed. Same-provider IDs compare exactly.
 The confidence weights are home team 0.25, away team 0.25, kickoff 0.20, score 0.15,
 competition 0.10, and season 0.05. Agreeing fields receive full weight, uncertain fields
 half weight, and missing or conflicting fields none. The default candidate threshold is
-0.70. Team, kickoff, or score conflicts always disqualify a candidate regardless of its
-numeric score. `findMatchCandidates` returns only qualified candidates, ordered by
-confidence with deterministic provider-ID tie breaking.
+0.70. Team, kickoff, score, or same-provider competition/season ID conflicts always
+disqualify a candidate regardless of its numeric score. Resolving both match sides to
+one canonical team is also a conflict. `findMatchCandidates` returns only qualified
+candidates, ordered by confidence with deterministic provider-ID tie breaking.
 
 This is candidate generation, not automatic acceptance. EmberDB does not create a
 `CanonicalMatch`, overwrite source values, or add match mappings from a reconciliation

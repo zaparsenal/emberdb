@@ -114,6 +114,35 @@ TEST(MatchReconciliationTest, DoesNotOverwriteOrAcceptConflictingTeams) {
   EXPECT_EQ(right.home_team.id, "9999");
 }
 
+TEST(MatchReconciliationTest, RejectsSameProviderContextConflicts) {
+  const auto identities = catalog();
+  auto right = statsbombMatch();
+  right.reference.id = "12346";
+  right.competition_id = "3";
+  right.competition_name = "Other Competition";
+
+  const auto result =
+      emberdb::reconcileMatches(statsbombMatch(), right, identities);
+
+  EXPECT_FALSE(result.is_candidate);
+  EXPECT_EQ(result.competition.status,
+            emberdb::ReconciliationStatus::Conflicting);
+}
+
+TEST(MatchReconciliationTest, RejectsOneCanonicalTeamOnBothSides) {
+  const auto identities = catalog();
+  auto left = statsbombMatch();
+  auto right = wyscoutMatch();
+  left.away_team = left.home_team;
+  right.away_team = right.home_team;
+
+  const auto result = emberdb::reconcileMatches(left, right, identities);
+
+  EXPECT_FALSE(result.is_candidate);
+  EXPECT_EQ(result.home_team.status, emberdb::ReconciliationStatus::Conflicting);
+  EXPECT_EQ(result.away_team.status, emberdb::ReconciliationStatus::Conflicting);
+}
+
 TEST(MatchReconciliationTest, ClassifiesKickoffToleranceWithoutFuzzyMatching) {
   const auto identities = catalog();
   auto right = wyscoutMatch();
