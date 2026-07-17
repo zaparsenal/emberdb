@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "emberdb/ingestion/metrica_event_adapter.h"
 #include "emberdb/ingestion/statsbomb_event_adapter.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
@@ -36,12 +37,14 @@ struct Options {
   std::string projection;
   std::string group_by;
   std::vector<std::string> aggregates;
+  std::optional<emberdb::AttackingDirection> home_first_half_direction;
 };
 
 void usage(std::ostream& output) {
-  output << "Usage: emberdb_cli import --provider statsbomb --match-id ID --input PATH "
+  output << "Usage: emberdb_cli import --provider PROVIDER --match-id ID --input PATH "
+            "[--home-first-half-direction left-to-right|right-to-left] "
             "[--output DATABASE] [--limit N]\n"
-            "       emberdb_cli query (--database DATABASE | --provider statsbomb "
+            "       emberdb_cli query (--database DATABASE | --provider PROVIDER "
             "--match-id ID --input PATH) "
             "(--project COLUMN[,COLUMN...] | --aggregate FUNCTION(COLUMN|*)) "
             "[--aggregate FUNCTION(COLUMN|*)]... [--group-by COLUMN[,COLUMN...]] "
@@ -106,6 +109,19 @@ Options parseOptions(int argc, char** argv) {
       options.group_by = value;
     } else if (option == "--aggregate") {
       options.aggregates.emplace_back(value);
+    } else if (option == "--home-first-half-direction") {
+      if (options.home_first_half_direction) {
+        throw std::runtime_error(
+            "--home-first-half-direction may only be specified once");
+      }
+      if (value == "left-to-right") {
+        options.home_first_half_direction = emberdb::AttackingDirection::LeftToRight;
+      } else if (value == "right-to-left") {
+        options.home_first_half_direction = emberdb::AttackingDirection::RightToLeft;
+      } else {
+        throw std::runtime_error(
+            "--home-first-half-direction must be left-to-right or right-to-left");
+      }
     } else {
       throw std::runtime_error("Unknown option '" + std::string(option) + "'");
     }
@@ -150,6 +166,15 @@ Options parseOptions(int argc, char** argv) {
       throw std::runtime_error("--limit is only valid for import");
     }
   }
+  if (options.home_first_half_direction && options.provider != "metrica") {
+    throw std::runtime_error(
+        "--home-first-half-direction is only valid with --provider metrica");
+  }
+  if (options.provider == "metrica" && has_any_raw_source &&
+      !options.home_first_half_direction) {
+    throw std::runtime_error(
+        "--provider metrica requires --home-first-half-direction");
+  }
   return options;
 }
 
@@ -157,10 +182,13 @@ emberdb::FootballEventTable importTable(const Options& options) {
   std::unique_ptr<emberdb::EventProviderAdapter> adapter;
   if (options.provider == "statsbomb") {
     adapter = std::make_unique<emberdb::StatsBombEventAdapter>();
+  } else if (options.provider == "metrica") {
+    adapter = std::make_unique<emberdb::MetricaEventAdapter>();
   } else {
     throw std::runtime_error("Unsupported provider '" + options.provider + "'");
   }
-  const auto events = adapter->loadEvents(options.input, {options.match_id});
+  const auto events = adapter->loadEvents(
+      options.input, {options.match_id, options.home_first_half_direction});
   emberdb::FootballEventTable table;
   for (const auto& event : events) {
     table.append(event);
@@ -408,7 +436,8 @@ int main(int argc, char** argv) {
         emberdb::saveFootballEventTable(table, options.output);
       }
       std::cout << "Imported " << table.rowCount() << " events\n"
-                << "Provider: StatsBomb\n"
+                << "Provider: "
+                << (table.rowCount() == 0 ? options.provider : table.row(0).provider) << '\n'
                 << "Match ID: " << options.match_id << '\n'
                 << "Columns: " << emberdb::FootballEventTable::kColumnCount << '\n'
                 << "Events with player data: " << table.playerDataCount() << '\n'

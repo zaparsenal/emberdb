@@ -7,7 +7,8 @@ EmberDB is a local columnar analytics engine specialized for football event data
 Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
-- a provider adapter interface and StatsBomb Open Data JSON adapter;
+- a provider adapter interface with StatsBomb Open Data JSON and Metrica Sports CSV
+  adapters;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
@@ -22,20 +23,17 @@ Implemented milestones include:
   programmatic query APIs; and
 - offline unit fixtures covering ingestion failures, coordinates, nulls, table behavior, and queries.
 
-SQL, compression, broader analytical expressions, and additional providers are not implemented.
+SQL, compression, broader analytical expressions, and cross-provider entity matching
+are not implemented.
 
 ## Architecture
 
 ```text
-StatsBomb event JSON
-        |
-        v
-EventProviderAdapter / StatsBombEventAdapter
-        |
-        v
-provider-specific coordinate validation and normalization
-        |
-        v
+StatsBomb JSON --> StatsBombEventAdapter --> validation/normalization --+
+                                                                    |
+Metrica CSV ----> MetricaEventAdapter ----> validation/normalization --+
+                                                                    |
+                                                                    v
 provider-independent FootballEvent values (import once)
         |
         v
@@ -43,7 +41,7 @@ in-memory FootballEventTable (one typed vector per field)
         |
         +----> versioned .ember columnar file
         |              |
-        |              +----> validated reload without provider JSON
+        |              +----> validated reload without provider files
         |
         v
 typed filters, projections, aggregations, and grouping
@@ -52,7 +50,8 @@ typed filters, projections, aggregations, and grouping
 CLI tabular results
 ```
 
-Raw StatsBomb JSON is confined to the adapter. Storage accepts only normalized events, leaving a clean seam for future provider adapters.
+Raw provider files are confined to ingestion adapters. Storage and query execution
+accept only normalized events and do not depend on StatsBomb or Metrica formats.
 
 The current 22 logical columns are provider event ID, match ID, period, timestamp,
 minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
@@ -107,7 +106,26 @@ Preview
 1: id=evt-carry-2 type=Carry team=Ember FC player=Alex Forward start=(59.166667, 28.125000) end=(65.000000, 36.250000) source_start=(71.000000, 22.500000) source_end=(78.000000, 29.000000)
 ```
 
-`--match-id` is required because StatsBomb event files do not reliably include match context in each event. Provider names are selected case-sensitively; currently only `statsbomb` is accepted.
+`--match-id` is required because source event files do not always carry usable match
+context. Provider names are selected case-sensitively; `statsbomb` and `metrica` are
+accepted.
+
+Import Metrica's standard event CSV:
+
+```bash
+./build/emberdb_cli import \
+  --provider metrica \
+  --match-id 1 \
+  --home-first-half-direction left-to-right \
+  --input Sample_Game_1_RawEventsData.csv \
+  --output sample-game-1.ember
+```
+
+Metrica uses fixed camera-oriented coordinates, and its public sample matches do not
+share one home-team first-half direction. The required direction option is therefore
+explicit import metadata; EmberDB does not guess it from shots, kickoff events, or player
+positions. Accepted values are `left-to-right` and `right-to-left`. The option is invalid
+for providers whose files already express attacking direction.
 
 Import once into an EmberDB database:
 
@@ -214,7 +232,7 @@ Nullable columns store one presence bit per row (`1` means present). Only presen
 are written to the typed payload. Identifiers and timestamps use 64-bit values;
 period, minute, and second use 32-bit values; coordinates use IEEE 754 binary64; and
 strings use a 64-bit byte length followed by their bytes. The format stores normalized
-provider-neutral columns, never raw StatsBomb JSON.
+provider-neutral columns, never raw provider JSON or CSV.
 
 Loading validates the magic, exact format version and schema, flags, canonical segment
 layout, file bounds, bitmap sizes and unused bits, payload sizes, checksums, string
@@ -224,7 +242,7 @@ column context. Writes use a temporary sibling and rename only after the complet
 has been written.
 
 Version 2 adds canonical and source-coordinate columns. Earlier version 1 files are
-rejected rather than guessed or silently migrated; reimport the provider JSON to create
+rejected rather than guessed or silently migrated; reimport the provider source to create
 a version 2 database.
 
 ## Data and coordinate semantics
@@ -241,11 +259,28 @@ oriented from the attacking team's goal toward the opponent's goal, so they requ
 direction flip. A provider whose events attack right to left flips normalized x with
 `100 - x`; normalized y is unchanged.
 
+The Metrica standard CSV adapter validates its fixed 0–1 coordinates and scales each axis
+by 100. It uses the imported home-team first-half direction, the event's `Home` or `Away`
+team, and the period to orient every event left to right. Metrica uses `NaN` pairs for
+missing locations. Some locations in the provider's public samples legitimately fall
+just beyond the touchline or goal line; EmberDB preserves those finite values in the
+source columns while leaving the corresponding canonical location null. Partially
+missing pairs and non-finite numeric values are rejected.
+
+Metrica standard CSV rows have no provider event ID. EmberDB derives a deterministic ID
+from the imported match ID, start frame, and zero-based event order. Its anonymized
+`Home`/`Away` and `PlayerN` labels map to the name columns; team and player ID columns stay
+null. Event types are converted from provider uppercase to stable title case, so a
+Metrica `PASS` and a StatsBomb `Pass` can both be queried as `event_type=Pass`. The
+provider subtype is retained in `outcome` because the current normalized model has no
+separate subtype column.
+
 `source_start_x`, `source_start_y`, `source_end_x`, and `source_end_y` retain the exact
 provider coordinates. Together with `provider`, they identify how each normalized value
 was produced. Missing source locations produce missing normalized and source columns.
 Non-finite or out-of-bounds provider coordinates fail ingestion rather than being
-clamped or silently discarded.
+clamped or silently discarded, except for the documented Metrica off-pitch location
+case above.
 
 Pass and carry end locations are supported. Outcomes are extracted from common StatsBomb detail objects (`pass`, `shot`, `duel`, `dribble`, and `goalkeeper`) when present.
 
@@ -256,16 +291,16 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - Equality is the only filter operation; there is no ordering, result limiting, SQL,
   optimizer, general expression evaluation, or distinct aggregation yet.
 - No compression, dictionary encoding, parallelism, SIMD, or memory mapping is used.
-- Only one event JSON file and one explicit match ID can be imported per invocation.
-- Only StatsBomb is supported; a second provider must offer a stable, documented, and
-  legitimately obtainable format.
+- Only one event source file and one explicit match ID can be imported per invocation.
+- Metrica's standard CSV adapter does not yet read its newer Game 3 JSON/FIFA package,
+  tracking data, team sheets, or player metadata.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is a second provider adapter, followed by cross-provider
-reconciliation. SQL is deliberately deferred; when resumed, it should translate into
+The recommended next milestone is cross-provider entity reconciliation. SQL is
+deliberately deferred; when resumed, it should translate into
 the existing typed filter, projection, aggregation, and grouping operations rather than
 bypassing them.
