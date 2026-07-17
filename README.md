@@ -4,7 +4,7 @@ EmberDB is a local columnar analytics engine specialized for football event data
 
 ## What works today
 
-The first two milestones implement:
+Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
 - a provider adapter interface and StatsBomb Open Data JSON adapter;
@@ -12,8 +12,10 @@ The first two milestones implement:
 - a typed 18-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - provider-neutral typed equality filters and projections with explicit null results;
 - deterministic query execution that preserves imported event order;
+- typed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregation with optional grouping;
 - an `import` CLI with deterministic summary counts and optional preview;
-- a `query` CLI that translates column filters and projections into the programmatic query API; and
+- a `query` CLI that translates filters, projections, aggregates, and grouping into the
+  programmatic query APIs; and
 - offline unit fixtures covering ingestion failures, coordinates, nulls, table behavior, and queries.
 
 SQL, persistent files, compression, analytical functions, and additional providers are not implemented.
@@ -33,7 +35,7 @@ provider-independent FootballEvent values
 in-memory FootballEventTable (one typed vector per field)
         |
         v
-typed equality filters and projections
+typed filters, projections, aggregations, and grouping
         |
         v
 CLI tabular results
@@ -127,6 +129,41 @@ The stable query column names are: `provider_event_id`, `match_id`, `period`,
 The query API is declared in `include/emberdb/query/event_query.h`. It accepts typed
 `EqualityPredicate` values rather than strings; the CLI is only a translation boundary.
 
+Aggregate and group events:
+
+```bash
+./build/emberdb_cli query \
+  --provider statsbomb \
+  --match-id 12345 \
+  --input tests/fixtures/complete_events.json \
+  --group-by event_type \
+  --aggregate 'count(*)' \
+  --aggregate 'avg(start_x)'
+```
+
+Example output (columns are tab-separated):
+
+```text
+Result rows: 2
+event_type  count(*)  avg(start_x)
+Pass        1         42.5
+Carry       1         71
+```
+
+Supported aggregate expressions are `count(*)`, `count(column)`, `sum(column)`,
+`avg(column)`, `min(column)`, and `max(column)`. `SUM` and `AVG` accept integer and
+numeric columns; `MIN` and `MAX` accept every column type. `--group-by` accepts one or
+more comma-separated columns. Existing `--filter` predicates run before grouping.
+
+`count(*)` counts matching rows, while `count(column)` ignores nulls. Other aggregates
+also ignore null inputs and return `NULL` when no non-null value exists. Null grouping
+keys form a group, and groups appear in first-seen source order. A global aggregation
+over no matching rows returns one row (`count(*)` is zero); a grouped aggregation over
+no matching rows returns no rows.
+
+The programmatic aggregation API is declared in
+`include/emberdb/query/aggregation_query.h`.
+
 ## Data and coordinate semantics
 
 StatsBomb timestamps are parsed into millisecond durations relative to the event period. The provider's `minute` and `second` fields are also retained as typed values.
@@ -138,8 +175,8 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 ## Current limitations
 
 - Imports live only for the duration of the CLI process; there is no persistent file format.
-- Equality is the only filter operation; there is no ordering, limiting, aggregation,
-  SQL, optimizer, or general expression evaluation yet.
+- Equality is the only filter operation; there is no ordering, result limiting, SQL,
+  optimizer, general expression evaluation, or distinct aggregation yet.
 - No compression, dictionary encoding, parallelism, SIMD, or memory mapping is used.
 - Only one event JSON file and one explicit match ID can be imported per invocation.
 - Only StatsBomb is supported, and its coordinate scale is preserved rather than normalized.
@@ -150,7 +187,7 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
 The recommended next milestone is coordinate normalization into a documented common
-pitch scale. Persistent columnar storage, aggregations and `GROUP BY`, a limited SQL
-parser, a second provider adapter, and cross-provider reconciliation should follow in
-that order. SQL should translate into the existing typed filter and projection
+pitch scale, followed by persistent columnar storage and then a limited SQL parser.
+A second provider adapter and cross-provider reconciliation should follow. SQL should
+translate into the existing typed filter, projection, aggregation, and grouping
 operations rather than bypassing them.

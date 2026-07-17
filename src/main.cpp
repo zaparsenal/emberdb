@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "emberdb/ingestion/statsbomb_event_adapter.h"
+#include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
 #include "emberdb/storage/football_event_table.h"
 
@@ -29,13 +30,17 @@ struct Options {
   bool has_limit{};
   std::vector<std::string> filters;
   std::string projection;
+  std::string group_by;
+  std::vector<std::string> aggregates;
 };
 
 void usage(std::ostream& output) {
   output << "Usage: emberdb_cli import --provider statsbomb --match-id ID --input PATH "
             "[--limit N]\n"
             "       emberdb_cli query --provider statsbomb --match-id ID --input PATH "
-            "--project COLUMN[,COLUMN...] [--filter COLUMN=VALUE]...\n";
+            "(--project COLUMN[,COLUMN...] | --aggregate FUNCTION(COLUMN|*)) "
+            "[--aggregate FUNCTION(COLUMN|*)]... [--group-by COLUMN[,COLUMN...]] "
+            "[--filter COLUMN=VALUE]...\n";
 }
 
 template <typename Integer>
@@ -86,6 +91,13 @@ Options parseOptions(int argc, char** argv) {
         throw std::runtime_error("--project may only be specified once");
       }
       options.projection = value;
+    } else if (option == "--group-by") {
+      if (!options.group_by.empty()) {
+        throw std::runtime_error("--group-by may only be specified once");
+      }
+      options.group_by = value;
+    } else if (option == "--aggregate") {
+      options.aggregates.emplace_back(value);
     } else {
       throw std::runtime_error("Unknown option '" + std::string(option) + "'");
     }
@@ -94,12 +106,18 @@ Options parseOptions(int argc, char** argv) {
     throw std::runtime_error("--provider, --match-id, and --input are required");
   }
   if (options.command == Command::Import &&
-      (!options.filters.empty() || !options.projection.empty())) {
-    throw std::runtime_error("--filter and --project are only valid for query");
+      (!options.filters.empty() || !options.projection.empty() ||
+       !options.group_by.empty() || !options.aggregates.empty())) {
+    throw std::runtime_error(
+        "--filter, --project, --group-by, and --aggregate are only valid for query");
   }
   if (options.command == Command::Query) {
-    if (options.projection.empty()) {
-      throw std::runtime_error("--project is required for query");
+    if (options.projection.empty() == options.aggregates.empty()) {
+      throw std::runtime_error(
+          "query requires exactly one of --project or --aggregate");
+    }
+    if (!options.projection.empty() && !options.group_by.empty()) {
+      throw std::runtime_error("--group-by requires --aggregate");
     }
     if (options.has_limit) {
       throw std::runtime_error("--limit is only valid for import");
@@ -179,6 +197,61 @@ emberdb::EventQuery makeQuery(const Options& options) {
   return query;
 }
 
+emberdb::AggregateFunction parseAggregateFunction(std::string_view name) {
+  if (name == "count") {
+    return emberdb::AggregateFunction::Count;
+  }
+  if (name == "sum") {
+    return emberdb::AggregateFunction::Sum;
+  }
+  if (name == "avg") {
+    return emberdb::AggregateFunction::Average;
+  }
+  if (name == "min") {
+    return emberdb::AggregateFunction::Minimum;
+  }
+  if (name == "max") {
+    return emberdb::AggregateFunction::Maximum;
+  }
+  throw std::runtime_error("Unknown aggregate function '" + std::string(name) + "'");
+}
+
+emberdb::AggregateExpression parseAggregate(std::string_view text) {
+  const auto open = text.find('(');
+  if (open == std::string_view::npos || open == 0 || text.back() != ')' ||
+      text.find(')', open) != text.size() - 1) {
+    throw std::runtime_error("Aggregate must have the form FUNCTION(COLUMN) or count(*)");
+  }
+  const auto function = parseAggregateFunction(text.substr(0, open));
+  const auto input = text.substr(open + 1, text.size() - open - 2);
+  if (input == "*") {
+    if (function != emberdb::AggregateFunction::Count) {
+      throw std::runtime_error("Only count(*) accepts '*'");
+    }
+    return {function};
+  }
+  if (input.empty()) {
+    throw std::runtime_error("Aggregate input column cannot be empty");
+  }
+  return {function, parseColumn(input)};
+}
+
+emberdb::AggregationQuery makeAggregationQuery(const Options& options) {
+  emberdb::AggregationQuery query;
+  if (!options.group_by.empty()) {
+    query.group_by = parseProjection(options.group_by);
+  }
+  query.filters.reserve(options.filters.size());
+  for (const auto& filter : options.filters) {
+    query.filters.push_back(parseFilter(filter));
+  }
+  query.aggregates.reserve(options.aggregates.size());
+  for (const auto& aggregate : options.aggregates) {
+    query.aggregates.push_back(parseAggregate(aggregate));
+  }
+  return query;
+}
+
 std::string optionalText(const std::optional<std::string>& value) {
   return value.value_or("NULL");
 }
@@ -205,7 +278,8 @@ void printPreview(const emberdb::FootballEventTable& table, std::size_t limit) {
   }
 }
 
-std::string queryValueText(const emberdb::FootballEventCell& cell) {
+template <typename Cell>
+std::string queryValueText(const Cell& cell) {
   if (!cell) {
     return "NULL";
   }
@@ -223,6 +297,26 @@ std::string queryValueText(const emberdb::FootballEventCell& cell) {
         }
       },
       *cell);
+}
+
+void printAggregationResult(const emberdb::AggregationResult& result) {
+  std::cout << "Result rows: " << result.rowCount() << '\n';
+  for (std::size_t column = 0; column < result.columnCount(); ++column) {
+    if (column != 0) {
+      std::cout << '\t';
+    }
+    std::cout << result.columnNames()[column];
+  }
+  std::cout << '\n';
+  for (std::size_t row = 0; row < result.rowCount(); ++row) {
+    for (std::size_t column = 0; column < result.columnCount(); ++column) {
+      if (column != 0) {
+        std::cout << '\t';
+      }
+      std::cout << queryValueText(result.cell(row, column));
+    }
+    std::cout << '\n';
+  }
 }
 
 void printQueryResult(const emberdb::EventQueryResult& result) {
@@ -268,7 +362,12 @@ int main(int argc, char** argv) {
     }
 
     if (options.command == Command::Query) {
-      printQueryResult(emberdb::executeQuery(table, makeQuery(options)));
+      if (!options.aggregates.empty()) {
+        printAggregationResult(
+            emberdb::executeAggregationQuery(table, makeAggregationQuery(options)));
+      } else {
+        printQueryResult(emberdb::executeQuery(table, makeQuery(options)));
+      }
     } else {
       std::cout << "Imported " << table.rowCount() << " events\n"
                 << "Provider: StatsBomb\n"

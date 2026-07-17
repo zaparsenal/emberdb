@@ -83,4 +83,43 @@ if(BUILD_TESTING)
   set_tests_properties(EmberDbCliTest.FiltersAndProjectsFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Matched 1 event"
   )
+
+  add_test(
+    NAME EmberDbCliTest.AggregatesAndGroupsFixture
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --aggregate "count(*)"
+      --aggregate "avg(start_x)"
+      --group-by event_type
+  )
+  set_tests_properties(EmberDbCliTest.AggregatesAndGroupsFixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "Result rows: 2"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.RejectsMixedProjectionAndAggregation
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --project event_type
+      --aggregate "count(*)"
+  )
+  set_tests_properties(EmberDbCliTest.RejectsMixedProjectionAndAggregation PROPERTIES
+    WILL_FAIL TRUE
+  )
+
+  add_test(
+    NAME EmberDbCliTest.RejectsTextSum
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --aggregate "sum(event_type)"
+  )
+  set_tests_properties(EmberDbCliTest.RejectsTextSum PROPERTIES
+    WILL_FAIL TRUE
+  )
 endif()
