@@ -21,7 +21,8 @@ Implemented milestones include:
 - a durable review store for canonical catalogs, provider mappings, generated match
   candidates, evidence, and accepted or rejected decisions;
 - audited catalog CLI commands to initialize a review store, add canonical entities,
-  map provider identities, and inspect current state or change history;
+  map provider identities, rename, deprecate, and merge canonical entities, and inspect
+  current state or change history;
 - entity candidate CLI commands to stage provider metadata and generate, list, inspect,
   accept, or reject explainable provider-to-canonical comparisons;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
@@ -109,7 +110,23 @@ source-schema and coordinate-system rules.
 player records separately from provider metadata. A canonical season belongs to an
 existing canonical competition. A provider identity can map to only one canonical ID,
 while several provider identities may map to the same canonical entity. Conflicting
-remaps and mappings to unknown canonical records are rejected.
+remaps and mappings to unknown or inactive canonical records are rejected.
+
+Competition, season, team, and player records have an explicit `active`, `deprecated`,
+or `merged` lifecycle. Renaming preserves the typed ID and existing mappings.
+Deprecation preserves historical mappings but prevents new mappings and excludes the
+record from entity-candidate generation. A competition cannot be deprecated while it
+still owns an active season.
+
+Merging keeps the source record as a durable alias, redirects its provider mappings,
+and flattens earlier aliases onto the final active target. Competition merges reparent
+seasons, season merges require both seasons to belong to the same competition, and team
+merges update canonical match sides unless that would collapse both sides to one team.
+Competition and season maintenance also updates matching legacy string labels on
+canonical matches. Player merges redirect only identity mappings because canonical
+matches do not own player records. Historical accepted candidates and audit entries
+remain valid through these redirects. Canonical match rename, deprecation, and merge are
+not supported.
 
 StatsBomb metadata ingestion reads competition/season, kickoff, home/away teams, scores,
 and lineup players. Wyscout metadata ingestion reads its separate competition, team,
@@ -141,6 +158,7 @@ with the canonical season's parent; a conflict disqualifies the candidate, while
 missing parent mapping remains visible as missing context. Duplicate provider records
 are collapsed only when their values agree; conflicting duplicates fail explicitly.
 Already-mapped provider identities are skipped.
+Deprecated and merged canonical records are also skipped.
 
 The programmatic APIs are declared in
 `include/emberdb/reconciliation/entity_reconciliation.h` and
@@ -430,6 +448,29 @@ Map provider identities only after the canonical target exists:
 Provider match mappings remain owned by accepted reconciliation decisions.
 Repeating an identical mapping is a no-op and does not consume a revision.
 
+Maintain existing competition, season, team, or player records with audited commands:
+
+```bash
+./build/emberdb_cli catalog rename --review match-review.json \
+  --entity player --canonical-id 10 --name "Alex A. Forward" \
+  --actor "reviewer@example.com" --source "provider profile" \
+  --reason "Correct canonical display name"
+
+./build/emberdb_cli catalog merge --review match-review.json \
+  --entity player --canonical-id 11 --target-canonical-id 10 \
+  --actor "reviewer@example.com" --source "catalog review" \
+  --reason "Consolidate duplicate player"
+
+./build/emberdb_cli catalog deprecate --review match-review.json \
+  --entity team --canonical-id 2 \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Retire inactive catalog entry"
+```
+
+Maintenance requires an active source; merge also requires a different active target.
+The source of a merge remains visible with `merged` status and its target ID. Repeating
+the same completed operation is a no-op. There is no reactivation command.
+
 Review the complete canonical catalog and mappings, or the append-only authoring
 history:
 
@@ -604,13 +645,15 @@ a version 2 database.
 ## Persistent match review format
 
 Match review files are separate UTF-8 JSON documents identified by
-`emberdb-match-review` and format version 3. They store canonical competition, season,
+`emberdb-match-review` and format version 4. They store canonical competition, season,
 team, player, and match catalogs; all provider mappings; generated match and entity
 candidates; numeric confidence; complete per-field evidence; decision status and
-provenance; catalog-change provenance; and a monotonic store revision. Version 1 review
-files load as revision zero with empty competition/season catalogs and no synthesized
-mappings. Version 2 files retain their catalog and match-review data with no entity
-candidates. The next successful write upgrades either earlier version to version 3.
+provenance; catalog-change provenance; canonical entity lifecycle state and merge
+targets; and a monotonic store revision. Version 1 review files load as revision zero
+with empty competition/season catalogs and no synthesized mappings. Version 2 files
+retain their catalog and match-review data with no entity candidates. Version 3 records
+load all canonical entities as active. The next successful write upgrades any earlier
+version to version 4.
 
 Loading rebuilds the canonical catalog through its validation APIs and rejects duplicate
 records, dangling mappings, invalid candidate values, contradictory decision fields,
@@ -686,7 +729,8 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
   automatically join the separately supported player, team, competition, or match
   metadata files.
 - Catalog authoring is intentionally one explicit entity or mapping per command. There
-  is no bulk canonical manifest import, rename, merge, or deprecation workflow yet.
+  is no bulk canonical manifest import, dry-run validation report, reactivation, or
+  automatic alias discovery.
 - Entity candidates use exact normalized names only. They do not perform fuzzy matching,
   aliases, transliteration, or automatic acceptance, and the open Wyscout match metadata
   cannot generate season candidates without names.
@@ -699,11 +743,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is catalog hardening against representative offline
-StatsBomb and Wyscout metadata: define reusable catalog fixtures, measure candidate
-coverage and name collisions, and add audited rename, merge, and deprecation semantics
-before supporting larger catalogs. A small bulk canonical-manifest importer can follow
-once its validation, conflict, dry-run, and provenance rules are defined. Event
+The recommended next milestone is representative offline catalog validation: define
+reusable StatsBomb and Wyscout metadata fixtures, measure exact-match coverage and name
+collisions, and produce a deterministic validation report without mutating the review
+store. Once those results define the real conflict cases, a small canonical-manifest
+importer can add dry-run, atomic validation, and per-change provenance. Event
 reconciliation should remain deferred until these identities have been exercised on
 real provider catalogs. SQL is also deliberately deferred; when resumed, it should
 translate into the existing typed operations rather than bypassing them.

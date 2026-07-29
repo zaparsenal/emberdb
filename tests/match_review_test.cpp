@@ -95,6 +95,59 @@ TEST(MatchReviewStoreTest, AuditsCatalogAuthoringAndMappingRevisions) {
   EXPECT_EQ(store.catalogChanges().back().provenance.actor, "reviewer");
 }
 
+TEST(MatchReviewStoreTest,
+     AuditsRenameMergeAndDeprecationIdempotently) {
+  auto store = reviewStore();
+  store.addPlayer({{10}, "Alex Forward"},
+                  provenance("Create canonical player"));
+  store.addPlayer({{11}, "A. Forward"},
+                  provenance("Create duplicate player"));
+  store.mapPlayer({"StatsBomb", "199", std::nullopt}, {11},
+                  provenance("Map duplicate player"));
+  store.renameCatalogEntity(emberdb::CatalogEntityType::Team, 1,
+                            "Arsenal Women",
+                            provenance("Correct team name"));
+  store.mergeCatalogEntity(emberdb::CatalogEntityType::Player, 11, 10,
+                           provenance("Merge duplicate player"));
+  store.deprecateCatalogEntity(emberdb::CatalogEntityType::Team, 2,
+                               provenance("Team record retired"));
+  const auto revision = store.revision();
+
+  store.renameCatalogEntity(emberdb::CatalogEntityType::Team, 1,
+                            "Arsenal Women",
+                            provenance("Repeat rename"));
+  store.mergeCatalogEntity(emberdb::CatalogEntityType::Player, 11, 10,
+                           provenance("Repeat merge"));
+  store.deprecateCatalogEntity(emberdb::CatalogEntityType::Team, 2,
+                               provenance("Repeat deprecation"));
+
+  EXPECT_EQ(store.revision(), revision);
+  EXPECT_EQ(store.catalog().team({1})->name, "Arsenal Women");
+  EXPECT_EQ(store.catalog().team({2})->status,
+            emberdb::CanonicalEntityStatus::Deprecated);
+  EXPECT_EQ(store.catalog().player({11})->status,
+            emberdb::CanonicalEntityStatus::Merged);
+  EXPECT_EQ(store.catalog().resolvePlayer(
+                {"StatsBomb", "199", std::nullopt}),
+            emberdb::CanonicalPlayerId{10});
+  ASSERT_EQ(store.catalogChanges().size(), 6U);
+  EXPECT_EQ(store.catalogChanges()[3].action,
+            emberdb::CatalogChangeAction::Rename);
+  EXPECT_EQ(store.catalogChanges()[4].action,
+            emberdb::CatalogChangeAction::Merge);
+  EXPECT_EQ(store.catalogChanges()[4].related_canonical_id, 10);
+  EXPECT_EQ(store.catalogChanges()[5].action,
+            emberdb::CatalogChangeAction::Deprecate);
+  EXPECT_THROW(
+      store.mergeCatalogEntity(emberdb::CatalogEntityType::Match, 100, 101,
+                               provenance("Unsupported merge")),
+      std::invalid_argument);
+  EXPECT_THROW(
+      store.mergeCatalogEntity(emberdb::CatalogEntityType::Player, 10, 10,
+                               provenance("Invalid self merge")),
+      std::invalid_argument);
+}
+
 TEST(MatchReviewStoreTest, AcceptsIdempotentlyAndCreatesBothMappings) {
   auto store = reviewStore();
   const auto id = store.addCandidates({candidate(store)})[0];

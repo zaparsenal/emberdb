@@ -122,6 +122,9 @@ bool isCatalogCommand(Command command) {
   return command == Command::CatalogInit ||
          command == Command::CatalogAdd ||
          command == Command::CatalogMap ||
+         command == Command::CatalogRename ||
+         command == Command::CatalogDeprecate ||
+         command == Command::CatalogMerge ||
          command == Command::CatalogList ||
          command == Command::CatalogHistory ||
          isEntityCandidateCommand(command);
@@ -205,7 +208,18 @@ void runCatalogCommand(const Options& options, std::ostream& output) {
   const auto loaded_revision = store.revision();
   const auto previous_change_count = store.catalogChanges().size();
   auto provenance = reviewProvenance(options);
-  if (options.command == Command::CatalogAdd) {
+  if (options.command == Command::CatalogRename) {
+    store.renameCatalogEntity(*options.catalog_entity, options.canonical_id,
+                              options.name, std::move(provenance));
+  } else if (options.command == Command::CatalogDeprecate) {
+    store.deprecateCatalogEntity(*options.catalog_entity,
+                                 options.canonical_id,
+                                 std::move(provenance));
+  } else if (options.command == Command::CatalogMerge) {
+    store.mergeCatalogEntity(*options.catalog_entity, options.canonical_id,
+                             options.target_canonical_id,
+                             std::move(provenance));
+  } else if (options.command == Command::CatalogAdd) {
     switch (*options.catalog_entity) {
       case CatalogEntityType::Competition:
         store.addCompetition({{options.canonical_id}, options.name},

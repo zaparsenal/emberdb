@@ -29,6 +29,11 @@ std::string coordinateText(const std::optional<Coordinate>& value) {
          ")";
 }
 
+template <typename Id>
+std::string optionalIdentifierText(const std::optional<Id>& value) {
+  return value ? std::to_string(value->value) : "NULL";
+}
+
 void printPreview(std::ostream& output, const FootballEventTable& table,
                   std::size_t limit) {
   if (limit == 0) {
@@ -168,6 +173,14 @@ void printUsage(std::ostream& output) {
             "       emberdb_cli catalog map --review PATH --entity ENTITY "
             "--canonical-id ID --provider PROVIDER --provider-id ID "
             "[--provider-match-id ID] "
+            "--actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog rename --review PATH --entity ENTITY "
+            "--canonical-id ID --name TEXT "
+            "--actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog deprecate --review PATH --entity ENTITY "
+            "--canonical-id ID --actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog merge --review PATH --entity ENTITY "
+            "--canonical-id SOURCE --target-canonical-id TARGET "
             "--actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli catalog list --review PATH\n"
             "       emberdb_cli catalog history --review PATH\n"
@@ -390,20 +403,28 @@ void printCatalogSummary(std::ostream& output,
   output << "Review revision: " << store.revision() << '\n'
          << "Competitions: " << catalog.competitions().size() << '\n';
   for (const auto& [id, competition] : catalog.competitions()) {
-    output << "competition\t" << id.value << '\t' << competition.name << '\n';
+    output << "competition\t" << id.value << '\t' << competition.name << '\t'
+           << canonicalEntityStatusName(competition.status) << '\t'
+           << optionalIdentifierText(competition.merged_into) << '\n';
   }
   output << "Seasons: " << catalog.seasons().size() << '\n';
   for (const auto& [id, season] : catalog.seasons()) {
     output << "season\t" << id.value << '\t' << season.competition_id.value
-           << '\t' << season.name << '\n';
+           << '\t' << season.name << '\t'
+           << canonicalEntityStatusName(season.status) << '\t'
+           << optionalIdentifierText(season.merged_into) << '\n';
   }
   output << "Teams: " << catalog.teams().size() << '\n';
   for (const auto& [id, team] : catalog.teams()) {
-    output << "team\t" << id.value << '\t' << team.name << '\n';
+    output << "team\t" << id.value << '\t' << team.name << '\t'
+           << canonicalEntityStatusName(team.status) << '\t'
+           << optionalIdentifierText(team.merged_into) << '\n';
   }
   output << "Players: " << catalog.players().size() << '\n';
   for (const auto& [id, player] : catalog.players()) {
-    output << "player\t" << id.value << '\t' << player.name << '\n';
+    output << "player\t" << id.value << '\t' << player.name << '\t'
+           << canonicalEntityStatusName(player.status) << '\t'
+           << optionalIdentifierText(player.merged_into) << '\n';
   }
   output << "Matches: " << catalog.matches().size() << '\n';
   for (const auto& [id, match] : catalog.matches()) {
@@ -446,7 +467,8 @@ void printCatalogHistory(
     const std::vector<CatalogChangeRecord>& catalog_changes) {
   output << "Catalog changes: " << catalog_changes.size() << '\n'
          << "revision\taction\tentity\tcanonical_id\tcanonical_name\t"
-            "provider_reference\tactor\tsource\treason\trecorded_at\n";
+            "provider_reference\trelated_canonical_id\tactor\tsource\t"
+            "reason\trecorded_at\n";
   for (const auto& change : catalog_changes) {
     const auto provider_reference =
         change.provider && change.provider_id
@@ -457,7 +479,11 @@ void printCatalogHistory(
            << catalogChangeActionName(change.action) << '\t'
            << catalogEntityTypeName(change.entity_type) << '\t'
            << change.canonical_id << '\t' << change.canonical_name << '\t'
-           << provider_reference << '\t' << change.provenance.actor << '\t'
+           << provider_reference << '\t'
+           << (change.related_canonical_id
+                   ? std::to_string(*change.related_canonical_id)
+                   : "NULL")
+           << '\t' << change.provenance.actor << '\t'
            << change.provenance.source << '\t' << change.provenance.reason
            << '\t'
            << change.provenance.recorded_at.time_since_epoch().count() << '\n';
@@ -478,6 +504,9 @@ void printCatalogMutation(std::ostream& output, std::uint64_t revision,
     output << " <- "
            << providerReferenceText(*change->provider, *change->provider_id,
                                     change->provider_match_id);
+  }
+  if (change->related_canonical_id) {
+    output << " -> " << *change->related_canonical_id;
   }
   output << '\n';
 }

@@ -89,6 +89,8 @@ class MatchReviewFileTest : public ::testing::Test {
 
 TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   auto original = store();
+  original.addPlayer({{11}, "A. Forward"},
+                     provenance("Create duplicate player"));
   const auto ids = original.addCandidates(
       {candidate(original, "2499719"), candidate(original, "2499720"),
        candidate(original, "2499721")});
@@ -98,7 +100,9 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
        entityCandidate(emberdb::IdentityEntityType::Team, "team", 1,
                        "Arsenal"),
        entityCandidate(emberdb::IdentityEntityType::Player, "player", 10,
-                       "Alex Forward")});
+                       "Alex Forward"),
+       entityCandidate(emberdb::IdentityEntityType::Player,
+                       "duplicate-player", 11, "A. Forward")});
   original.accept(ids[0], {100}, provenance("Metadata agrees"));
   original.reject(
       ids[1],
@@ -107,6 +111,19 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
                                  provenance("Competition verified"));
   original.rejectEntityCandidate(entity_ids[1],
                                  provenance("Different team"));
+  original.acceptEntityCandidate(entity_ids[3],
+                                 provenance("Duplicate player verified"));
+  original.mergeCatalogEntity(emberdb::CatalogEntityType::Player, 11, 10,
+                              provenance("Merge duplicate player"));
+  original.renameCatalogEntity(emberdb::CatalogEntityType::Player, 10,
+                               "Alex A. Forward",
+                               provenance("Correct player name"));
+  original.deprecateCatalogEntity(emberdb::CatalogEntityType::Team, 2,
+                                  provenance("Retire duplicate team"));
+  original.deprecateCatalogEntity(emberdb::CatalogEntityType::Season, 30,
+                                  provenance("Retire completed season"));
+  original.deprecateCatalogEntity(emberdb::CatalogEntityType::Competition, 20,
+                                  provenance("Retire competition"));
 
   emberdb::createMatchReviewStore(original, path_);
   const auto loaded = emberdb::loadMatchReviewStore(path_);
@@ -114,7 +131,7 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   EXPECT_EQ(loaded.catalog().competitions().size(), 1U);
   EXPECT_EQ(loaded.catalog().seasons().size(), 1U);
   EXPECT_EQ(loaded.catalog().teams().size(), 2U);
-  EXPECT_EQ(loaded.catalog().players().size(), 1U);
+  EXPECT_EQ(loaded.catalog().players().size(), 2U);
   EXPECT_EQ(loaded.catalog().matches().size(), 1U);
   EXPECT_EQ(loaded.catalog().playerMappings().begin()->first.match_id, "match-1");
   EXPECT_EQ(loaded.catalog().resolveCompetition({"Wyscout", "364"}),
@@ -135,7 +152,7 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   EXPECT_DOUBLE_EQ(loaded.candidate(ids[2])->reconciliation.confidence, 1.0);
   EXPECT_EQ(loaded.candidate(ids[2])->reconciliation.home_team.canonical_value,
             "1");
-  ASSERT_EQ(loaded.entityCandidates().size(), 3U);
+  ASSERT_EQ(loaded.entityCandidates().size(), 4U);
   EXPECT_EQ(loaded.entityCandidate(entity_ids[0])->status,
             emberdb::MatchCandidateStatus::Accepted);
   EXPECT_EQ(loaded.catalog().resolveCompetition(
@@ -145,6 +162,26 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
             "Different team");
   EXPECT_EQ(loaded.entityCandidate(entity_ids[2])->status,
             emberdb::MatchCandidateStatus::Unresolved);
+  EXPECT_EQ(loaded.catalog().player({10})->name, "Alex A. Forward");
+  EXPECT_EQ(loaded.catalog().player({11})->status,
+            emberdb::CanonicalEntityStatus::Merged);
+  EXPECT_EQ(loaded.catalog().player({11})->merged_into,
+            emberdb::CanonicalPlayerId{10});
+  EXPECT_EQ(loaded.catalog().team({2})->status,
+            emberdb::CanonicalEntityStatus::Deprecated);
+  EXPECT_EQ(loaded.catalog().season({30})->status,
+            emberdb::CanonicalEntityStatus::Deprecated);
+  EXPECT_EQ(loaded.catalog().competition({20})->status,
+            emberdb::CanonicalEntityStatus::Deprecated);
+  EXPECT_EQ(loaded.entityCandidate(entity_ids[3])->status,
+            emberdb::MatchCandidateStatus::Accepted);
+  EXPECT_EQ(loaded.catalog().resolvePlayer(
+                {"OtherProvider", "duplicate-player", std::nullopt}),
+            emberdb::CanonicalPlayerId{10});
+  ASSERT_EQ(loaded.catalogChanges().size(), 8U);
+  EXPECT_EQ(loaded.catalogChanges()[3].action,
+            emberdb::CatalogChangeAction::Merge);
+  EXPECT_EQ(loaded.catalogChanges()[3].related_canonical_id, 10);
 }
 
 TEST_F(MatchReviewFileTest, AtomicallyReplacesExistingReviewFile) {
@@ -195,6 +232,45 @@ TEST_F(MatchReviewFileTest, RejectsStaleRevisionWithoutOverwritingNewerStore) {
   ASSERT_EQ(loaded.catalogChanges().size(), 1U);
   EXPECT_EQ(loaded.catalogChanges()[0].canonical_name, "First Player");
   EXPECT_EQ(loaded.catalogChanges()[0].provenance.reason, "First edit");
+}
+
+TEST_F(MatchReviewFileTest, LoadsVersionThreeEntitiesAsActive) {
+  std::ofstream(path_) << R"({
+    "format": "emberdb-match-review",
+    "version": 3,
+    "revision": 0,
+    "catalog": {
+      "competitions": [{"id": 20, "name": "Premier League"}],
+      "seasons": [
+        {"id": 30, "competition_id": 20, "name": "2023/2024"}
+      ],
+      "teams": [
+        {"id": 1, "name": "North FC"},
+        {"id": 2, "name": "South FC"}
+      ],
+      "players": [{"id": 10, "name": "Alex Forward"}],
+      "matches": [],
+      "competition_mappings": [],
+      "season_mappings": [],
+      "team_mappings": [],
+      "player_mappings": [],
+      "match_mappings": []
+    },
+    "catalog_changes": [],
+    "entity_candidates": [],
+    "candidates": []
+  })";
+
+  const auto loaded = emberdb::loadMatchReviewStore(path_);
+
+  EXPECT_EQ(loaded.catalog().competition({20})->status,
+            emberdb::CanonicalEntityStatus::Active);
+  EXPECT_EQ(loaded.catalog().season({30})->status,
+            emberdb::CanonicalEntityStatus::Active);
+  EXPECT_EQ(loaded.catalog().team({1})->status,
+            emberdb::CanonicalEntityStatus::Active);
+  EXPECT_EQ(loaded.catalog().player({10})->status,
+            emberdb::CanonicalEntityStatus::Active);
 }
 
 TEST_F(MatchReviewFileTest, RejectsUnsupportedAndMalformedFilesWithContext) {

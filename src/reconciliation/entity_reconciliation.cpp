@@ -128,6 +128,9 @@ std::vector<EntityReconciliation> findEntityCandidates(
           continue;
         }
         for (const auto& [id, canonical] : catalog.competitions()) {
+          if (canonical.status != CanonicalEntityStatus::Active) {
+            continue;
+          }
           if (normalizedName(provider->name) ==
               normalizedName(canonical.name)) {
             candidates.push_back(candidate(
@@ -153,6 +156,9 @@ std::vector<EntityReconciliation> findEntityCandidates(
         const auto resolved_competition =
             catalog.resolveCompetition(provider->competition);
         for (const auto& [id, canonical] : catalog.seasons()) {
+          if (canonical.status != CanonicalEntityStatus::Active) {
+            continue;
+          }
           if (normalizedName(*provider->name) !=
               normalizedName(canonical.name)) {
             continue;
@@ -186,6 +192,9 @@ std::vector<EntityReconciliation> findEntityCandidates(
           continue;
         }
         for (const auto& [id, canonical] : catalog.teams()) {
+          if (canonical.status != CanonicalEntityStatus::Active) {
+            continue;
+          }
           if (normalizedName(provider->name) ==
               normalizedName(canonical.name)) {
             candidates.push_back(candidate(
@@ -207,6 +216,9 @@ std::vector<EntityReconciliation> findEntityCandidates(
           continue;
         }
         for (const auto& [id, canonical] : catalog.players()) {
+          if (canonical.status != CanonicalEntityStatus::Active) {
+            continue;
+          }
           if (normalizedName(provider->name) ==
               normalizedName(canonical.name)) {
             candidates.push_back(candidate(

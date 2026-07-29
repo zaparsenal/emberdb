@@ -100,6 +100,28 @@ TEST(EntityReconciliationTest,
                   .empty());
 }
 
+TEST(EntityReconciliationTest, SkipsDeprecatedAndMergedCanonicalEntities) {
+  emberdb::ProviderMetadata metadata;
+  metadata.teams.push_back(
+      {{"StatsBomb", "10", std::nullopt}, "North FC"});
+  metadata.players.push_back(
+      {{"StatsBomb", "99", std::nullopt}, "Alex Forward", std::nullopt});
+  auto identities = catalog();
+  identities.addTeam({{2}, "North City"});
+  identities.deprecateTeam({1});
+  identities.addPlayer({{11}, "Alex F."});
+  identities.mergePlayer({10}, {11});
+
+  EXPECT_TRUE(emberdb::findEntityCandidates(
+                  metadata, emberdb::IdentityEntityType::Team, identities,
+                  "statsbomb teams fixture")
+                  .empty());
+  EXPECT_TRUE(emberdb::findEntityCandidates(
+                  metadata, emberdb::IdentityEntityType::Player, identities,
+                  "statsbomb players fixture")
+                  .empty());
+}
+
 TEST(EntityReconciliationTest, RejectsConflictingDuplicateProviderMetadata) {
   emberdb::ProviderMetadata metadata;
   metadata.teams.push_back(

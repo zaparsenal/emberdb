@@ -66,6 +66,11 @@ Json optionalString(const std::optional<std::string>& value) {
   return value ? Json(*value) : Json(nullptr);
 }
 
+template <typename Id>
+Json optionalIdentifier(const std::optional<Id>& value) {
+  return value ? Json(value->value) : Json(nullptr);
+}
+
 Json providerMatchJson(const ProviderMatchReference& reference) {
   return {{"provider", reference.provider}, {"id", reference.id}};
 }
@@ -135,19 +140,32 @@ Json catalogJson(const CanonicalIdentityCatalog& catalog) {
                  {"match_mappings", Json::array()}};
   for (const auto& [id, competition] : catalog.competitions()) {
     result["competitions"].push_back(
-        {{"id", id.value}, {"name", competition.name}});
+        {{"id", id.value},
+         {"name", competition.name},
+         {"status", canonicalEntityStatusName(competition.status)},
+         {"merged_into", optionalIdentifier(competition.merged_into)}});
   }
   for (const auto& [id, season] : catalog.seasons()) {
     result["seasons"].push_back(
         {{"id", id.value},
          {"competition_id", season.competition_id.value},
-         {"name", season.name}});
+         {"name", season.name},
+         {"status", canonicalEntityStatusName(season.status)},
+         {"merged_into", optionalIdentifier(season.merged_into)}});
   }
   for (const auto& [id, team] : catalog.teams()) {
-    result["teams"].push_back({{"id", id.value}, {"name", team.name}});
+    result["teams"].push_back(
+        {{"id", id.value},
+         {"name", team.name},
+         {"status", canonicalEntityStatusName(team.status)},
+         {"merged_into", optionalIdentifier(team.merged_into)}});
   }
   for (const auto& [id, player] : catalog.players()) {
-    result["players"].push_back({{"id", id.value}, {"name", player.name}});
+    result["players"].push_back(
+        {{"id", id.value},
+         {"name", player.name},
+         {"status", canonicalEntityStatusName(player.status)},
+         {"merged_into", optionalIdentifier(player.merged_into)}});
   }
   for (const auto& [id, match] : catalog.matches()) {
     result["matches"].push_back(
@@ -255,6 +273,9 @@ Json catalogChangeJson(const CatalogChangeRecord& change) {
       {"provider", optionalString(change.provider)},
       {"provider_id", optionalString(change.provider_id)},
       {"provider_match_id", optionalString(change.provider_match_id)},
+      {"related_canonical_id",
+       change.related_canonical_id ? Json(*change.related_canonical_id)
+                                   : Json(nullptr)},
       {"provenance", provenanceJson(change.provenance)}};
 }
 
@@ -315,7 +336,18 @@ MatchCandidateStatus readCandidateStatus(const std::string& value) {
 CatalogChangeAction readCatalogChangeAction(const std::string& value) {
   if (value == "add") return CatalogChangeAction::Add;
   if (value == "map") return CatalogChangeAction::Map;
+  if (value == "rename") return CatalogChangeAction::Rename;
+  if (value == "deprecate") return CatalogChangeAction::Deprecate;
+  if (value == "merge") return CatalogChangeAction::Merge;
   throw std::invalid_argument("unknown catalog change action '" + value + "'");
+}
+
+CanonicalEntityStatus readCanonicalEntityStatus(const std::string& value) {
+  if (value == "active") return CanonicalEntityStatus::Active;
+  if (value == "deprecated") return CanonicalEntityStatus::Deprecated;
+  if (value == "merged") return CanonicalEntityStatus::Merged;
+  throw std::invalid_argument("unknown canonical entity status '" + value +
+                              "'");
 }
 
 CatalogEntityType readCatalogEntityType(const std::string& value) {
@@ -357,6 +389,17 @@ EntityFieldEvidence readEntityEvidence(const Json& value) {
   return {readEvidenceStatus(value.at("status").get<std::string>()),
           readOptionalString(value, "provider_value"),
           readOptionalString(value, "canonical_value")};
+}
+
+template <typename Id>
+std::optional<Id> readMergedInto(const Json& value,
+                                 std::uint32_t format_version) {
+  if (format_version < 4) {
+    return std::nullopt;
+  }
+  const auto merged_into =
+      readOptionalNumber<Identifier>(value, "merged_into");
+  return merged_into ? std::optional<Id>{Id{*merged_into}} : std::nullopt;
 }
 
 CanonicalIdentityCatalog readCatalog(const Json& value,
@@ -424,6 +467,98 @@ CanonicalIdentityCatalog readCatalog(const Json& value,
     catalog.mapMatch(readProviderMatch(mapping),
                      {mapping.at("canonical_id").get<Identifier>()});
   }
+  if (format_version >= 4) {
+    for (const auto& competition : value.at("competitions")) {
+      const auto id =
+          CanonicalCompetitionId{competition.at("id").get<Identifier>()};
+      const auto status = readCanonicalEntityStatus(
+          competition.at("status").get<std::string>());
+      const auto target =
+          readMergedInto<CanonicalCompetitionId>(competition, format_version);
+      if (status == CanonicalEntityStatus::Merged && target) {
+        catalog.mergeCompetition(id, *target);
+      } else if ((status != CanonicalEntityStatus::Active &&
+                  status != CanonicalEntityStatus::Deprecated) ||
+                 target) {
+        throw std::invalid_argument(
+            "canonical competition has invalid lifecycle data");
+      }
+    }
+    for (const auto& season : value.at("seasons")) {
+      const auto id = CanonicalSeasonId{season.at("id").get<Identifier>()};
+      const auto status =
+          readCanonicalEntityStatus(season.at("status").get<std::string>());
+      const auto target =
+          readMergedInto<CanonicalSeasonId>(season, format_version);
+      if (status == CanonicalEntityStatus::Merged && target) {
+        catalog.mergeSeason(id, *target);
+      } else if ((status != CanonicalEntityStatus::Active &&
+                  status != CanonicalEntityStatus::Deprecated) ||
+                 target) {
+        throw std::invalid_argument(
+            "canonical season has invalid lifecycle data");
+      }
+    }
+    for (const auto& team : value.at("teams")) {
+      const auto id = CanonicalTeamId{team.at("id").get<Identifier>()};
+      const auto status =
+          readCanonicalEntityStatus(team.at("status").get<std::string>());
+      const auto target =
+          readMergedInto<CanonicalTeamId>(team, format_version);
+      if (status == CanonicalEntityStatus::Merged && target) {
+        catalog.mergeTeam(id, *target);
+      } else if ((status != CanonicalEntityStatus::Active &&
+                  status != CanonicalEntityStatus::Deprecated) ||
+                 target) {
+        throw std::invalid_argument(
+            "canonical team has invalid lifecycle data");
+      }
+    }
+    for (const auto& player : value.at("players")) {
+      const auto id = CanonicalPlayerId{player.at("id").get<Identifier>()};
+      const auto status =
+          readCanonicalEntityStatus(player.at("status").get<std::string>());
+      const auto target =
+          readMergedInto<CanonicalPlayerId>(player, format_version);
+      if (status == CanonicalEntityStatus::Merged && target) {
+        catalog.mergePlayer(id, *target);
+      } else if ((status != CanonicalEntityStatus::Active &&
+                  status != CanonicalEntityStatus::Deprecated) ||
+                 target) {
+        throw std::invalid_argument(
+            "canonical player has invalid lifecycle data");
+      }
+    }
+    for (const auto& season : value.at("seasons")) {
+      if (readCanonicalEntityStatus(
+              season.at("status").get<std::string>()) ==
+          CanonicalEntityStatus::Deprecated) {
+        catalog.deprecateSeason({season.at("id").get<Identifier>()});
+      }
+    }
+    for (const auto& competition : value.at("competitions")) {
+      if (readCanonicalEntityStatus(
+              competition.at("status").get<std::string>()) ==
+          CanonicalEntityStatus::Deprecated) {
+        catalog.deprecateCompetition(
+            {competition.at("id").get<Identifier>()});
+      }
+    }
+    for (const auto& team : value.at("teams")) {
+      if (readCanonicalEntityStatus(
+              team.at("status").get<std::string>()) ==
+          CanonicalEntityStatus::Deprecated) {
+        catalog.deprecateTeam({team.at("id").get<Identifier>()});
+      }
+    }
+    for (const auto& player : value.at("players")) {
+      if (readCanonicalEntityStatus(
+              player.at("status").get<std::string>()) ==
+          CanonicalEntityStatus::Deprecated) {
+        catalog.deprecatePlayer({player.at("id").get<Identifier>()});
+      }
+    }
+  }
   return catalog;
 }
 
@@ -480,6 +615,10 @@ EntityCandidateRecord readEntityCandidate(const Json& value) {
 }
 
 CatalogChangeRecord readCatalogChange(const Json& value) {
+  const auto related_canonical_id =
+      value.contains("related_canonical_id")
+          ? readOptionalNumber<Identifier>(value, "related_canonical_id")
+          : std::nullopt;
   return {value.at("revision").get<std::uint64_t>(),
           readCatalogChangeAction(value.at("action").get<std::string>()),
           readCatalogEntityType(value.at("entity_type").get<std::string>()),
@@ -488,7 +627,8 @@ CatalogChangeRecord readCatalogChange(const Json& value) {
           readOptionalString(value, "provider"),
           readOptionalString(value, "provider_id"),
           readOptionalString(value, "provider_match_id"),
-          readProvenance(value.at("provenance"))};
+          readProvenance(value.at("provenance")),
+          related_canonical_id};
 }
 
 Json storeJson(const MatchReviewStore& store) {

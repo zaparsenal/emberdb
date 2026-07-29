@@ -69,16 +69,31 @@ TEST(CliRendererTest, RendersCatalogSummaryAndAuditHistory) {
       std::chrono::sys_seconds{std::chrono::seconds{1'700'000'000}}};
   store.addCompetition({{20}, "Premier League"}, provenance);
   store.mapCompetition({"StatsBomb", "2"}, {20}, provenance);
+  store.addPlayer({{10}, "Alex Forward"}, provenance);
+  store.addPlayer({{11}, "A. Forward"}, provenance);
+  store.renameCatalogEntity(emberdb::CatalogEntityType::Player, 10,
+                            "Alex A. Forward", provenance);
+  store.mergeCatalogEntity(emberdb::CatalogEntityType::Player, 11, 10,
+                           provenance);
   std::ostringstream summary;
   std::ostringstream history;
 
   emberdb::cli::printCatalogSummary(summary, store);
   emberdb::cli::printCatalogHistory(history, store.catalogChanges());
 
-  EXPECT_NE(summary.str().find("Review revision: 2"), std::string::npos);
+  EXPECT_NE(summary.str().find("Review revision: 6"), std::string::npos);
   EXPECT_NE(summary.str().find("competition\tStatsBomb:2\t20"),
             std::string::npos);
+  EXPECT_NE(summary.str().find("player\t10\tAlex A. Forward\tactive\tNULL"),
+            std::string::npos);
+  EXPECT_NE(summary.str().find("player\t11\tA. Forward\tmerged\t10"),
+            std::string::npos);
   EXPECT_NE(history.str().find("2\tmap\tcompetition\t20"),
+            std::string::npos);
+  EXPECT_NE(history.str().find("5\trename\tplayer\t10\tAlex A. Forward"),
+            std::string::npos);
+  EXPECT_NE(history.str().find(
+                "6\tmerge\tplayer\t11\tA. Forward\tNULL\t10"),
             std::string::npos);
   EXPECT_NE(history.str().find("reviewer\tprovider catalog\tVerified identity"),
             std::string::npos);
@@ -131,6 +146,12 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog init"), std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog history"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog rename"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog deprecate"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog merge"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog candidates generate"),
             std::string::npos);

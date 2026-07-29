@@ -83,26 +83,135 @@ bool canonicalEntityExists(const CanonicalIdentityCatalog& catalog,
   return false;
 }
 
+CanonicalEntityStatus canonicalEntityStatus(
+    const CanonicalIdentityCatalog& catalog, CatalogEntityType entity_type,
+    Identifier canonical_id) {
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      return catalog.competition({canonical_id})->status;
+    case CatalogEntityType::Season:
+      return catalog.season({canonical_id})->status;
+    case CatalogEntityType::Team:
+      return catalog.team({canonical_id})->status;
+    case CatalogEntityType::Player:
+      return catalog.player({canonical_id})->status;
+    case CatalogEntityType::Match:
+      return CanonicalEntityStatus::Active;
+  }
+  return CanonicalEntityStatus::Active;
+}
+
+std::optional<Identifier> mergedTarget(
+    const CanonicalIdentityCatalog& catalog, CatalogEntityType entity_type,
+    Identifier canonical_id) {
+  switch (entity_type) {
+    case CatalogEntityType::Competition: {
+      const auto target = catalog.competition({canonical_id})->merged_into;
+      return target ? std::optional<Identifier>{target->value} : std::nullopt;
+    }
+    case CatalogEntityType::Season: {
+      const auto target = catalog.season({canonical_id})->merged_into;
+      return target ? std::optional<Identifier>{target->value} : std::nullopt;
+    }
+    case CatalogEntityType::Team: {
+      const auto target = catalog.team({canonical_id})->merged_into;
+      return target ? std::optional<Identifier>{target->value} : std::nullopt;
+    }
+    case CatalogEntityType::Player: {
+      const auto target = catalog.player({canonical_id})->merged_into;
+      return target ? std::optional<Identifier>{target->value} : std::nullopt;
+    }
+    case CatalogEntityType::Match:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+Identifier currentCanonicalId(const CanonicalIdentityCatalog& catalog,
+                              CatalogEntityType entity_type,
+                              Identifier canonical_id) {
+  if (canonicalEntityStatus(catalog, entity_type, canonical_id) ==
+      CanonicalEntityStatus::Merged) {
+    return *mergedTarget(catalog, entity_type, canonical_id);
+  }
+  return canonical_id;
+}
+
+CatalogEntityType catalogEntityType(IdentityEntityType entity_type) {
+  switch (entity_type) {
+    case IdentityEntityType::Competition:
+      return CatalogEntityType::Competition;
+    case IdentityEntityType::Season:
+      return CatalogEntityType::Season;
+    case IdentityEntityType::Team:
+      return CatalogEntityType::Team;
+    case IdentityEntityType::Player:
+      return CatalogEntityType::Player;
+  }
+  return CatalogEntityType::Player;
+}
+
+bool canonicalIdsAgree(const CanonicalIdentityCatalog& catalog,
+                       CatalogEntityType entity_type, Identifier expected,
+                       Identifier actual) {
+  return currentCanonicalId(catalog, entity_type, expected) ==
+         currentCanonicalId(catalog, entity_type, actual);
+}
+
+std::string canonicalEntityName(const CanonicalIdentityCatalog& catalog,
+                                CatalogEntityType entity_type,
+                                Identifier canonical_id) {
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      return catalog.competition({canonical_id})->name;
+    case CatalogEntityType::Season:
+      return catalog.season({canonical_id})->name;
+    case CatalogEntityType::Team:
+      return catalog.team({canonical_id})->name;
+    case CatalogEntityType::Player:
+      return catalog.player({canonical_id})->name;
+    case CatalogEntityType::Match: {
+      const auto* match = catalog.match({canonical_id});
+      return match->competition + " " + match->season;
+    }
+  }
+  return {};
+}
+
 bool entityMappingMatches(const CanonicalIdentityCatalog& catalog,
                           const EntityReconciliation& reconciliation) {
   const auto& reference = reconciliation.provider_identity;
+  std::optional<Identifier> mapped;
   switch (reconciliation.entity_type) {
     case IdentityEntityType::Competition:
-      return catalog.resolveCompetition({reference.provider, reference.id}) ==
-             CanonicalCompetitionId{reconciliation.canonical_id};
+      if (const auto id =
+              catalog.resolveCompetition({reference.provider, reference.id})) {
+        mapped = id->value;
+      }
+      break;
     case IdentityEntityType::Season:
-      return catalog.resolveSeason({reference.provider, reference.id}) ==
-             CanonicalSeasonId{reconciliation.canonical_id};
+      if (const auto id =
+              catalog.resolveSeason({reference.provider, reference.id})) {
+        mapped = id->value;
+      }
+      break;
     case IdentityEntityType::Team:
-      return catalog.resolveTeam(
-                 {reference.provider, reference.id, reference.match_id}) ==
-             CanonicalTeamId{reconciliation.canonical_id};
+      if (const auto id = catalog.resolveTeam(
+              {reference.provider, reference.id, reference.match_id})) {
+        mapped = id->value;
+      }
+      break;
     case IdentityEntityType::Player:
-      return catalog.resolvePlayer(
-                 {reference.provider, reference.id, reference.match_id}) ==
-             CanonicalPlayerId{reconciliation.canonical_id};
+      if (const auto id = catalog.resolvePlayer(
+              {reference.provider, reference.id, reference.match_id})) {
+        mapped = id->value;
+      }
+      break;
   }
-  return false;
+  return mapped &&
+         canonicalIdsAgree(catalog,
+                           catalogEntityType(reconciliation.entity_type),
+                           reconciliation.canonical_id, *mapped);
 }
 
 void validateEntityReconciliation(
@@ -141,26 +250,40 @@ bool catalogMappingMatches(const CanonicalIdentityCatalog& catalog,
   if (!change.provider || !change.provider_id) {
     return false;
   }
+  std::optional<Identifier> mapped;
   switch (change.entity_type) {
     case CatalogEntityType::Competition:
-      return catalog.resolveCompetition(
-                 {*change.provider, *change.provider_id}) ==
-             CanonicalCompetitionId{change.canonical_id};
+      if (const auto id = catalog.resolveCompetition(
+              {*change.provider, *change.provider_id})) {
+        mapped = id->value;
+      }
+      break;
     case CatalogEntityType::Season:
-      return catalog.resolveSeason({*change.provider, *change.provider_id}) ==
-             CanonicalSeasonId{change.canonical_id};
+      if (const auto id =
+              catalog.resolveSeason({*change.provider, *change.provider_id})) {
+        mapped = id->value;
+      }
+      break;
     case CatalogEntityType::Team:
-      return catalog.resolveTeam({*change.provider, *change.provider_id,
-                                  change.provider_match_id}) ==
-             CanonicalTeamId{change.canonical_id};
+      if (const auto id =
+              catalog.resolveTeam({*change.provider, *change.provider_id,
+                                   change.provider_match_id})) {
+        mapped = id->value;
+      }
+      break;
     case CatalogEntityType::Player:
-      return catalog.resolvePlayer({*change.provider, *change.provider_id,
-                                    change.provider_match_id}) ==
-             CanonicalPlayerId{change.canonical_id};
+      if (const auto id =
+              catalog.resolvePlayer({*change.provider, *change.provider_id,
+                                     change.provider_match_id})) {
+        mapped = id->value;
+      }
+      break;
     case CatalogEntityType::Match:
       return false;
   }
-  return false;
+  return mapped &&
+         canonicalIdsAgree(catalog, change.entity_type, change.canonical_id,
+                           *mapped);
 }
 
 void requireCompatibleMapping(const CanonicalIdentityCatalog& catalog,
@@ -258,24 +381,57 @@ MatchReviewStore MatchReviewStore::restore(
       throw std::invalid_argument(
           "persisted catalog change references an unknown canonical entity");
     }
-    if (change.action == CatalogChangeAction::Add) {
-      if (change.provider || change.provider_id || change.provider_match_id) {
-        throw std::invalid_argument(
-            "persisted catalog addition contains provider mapping data");
-      }
-    } else {
-      if (!change.provider || !change.provider_id ||
-          change.provider->empty() || change.provider_id->empty() ||
-          !catalogMappingMatches(store.catalog_, change)) {
-        throw std::invalid_argument(
-            "persisted catalog mapping does not match the durable catalog");
-      }
-      if ((change.entity_type == CatalogEntityType::Competition ||
-           change.entity_type == CatalogEntityType::Season) &&
-          change.provider_match_id) {
-        throw std::invalid_argument(
-            "persisted competition or season mapping has a match scope");
-      }
+    switch (change.action) {
+      case CatalogChangeAction::Add:
+      case CatalogChangeAction::Rename:
+        if (change.provider || change.provider_id ||
+            change.provider_match_id || change.related_canonical_id) {
+          throw std::invalid_argument(
+              "persisted catalog change contains unexpected related data");
+        }
+        break;
+      case CatalogChangeAction::Deprecate:
+        if (change.provider || change.provider_id ||
+            change.provider_match_id || change.related_canonical_id ||
+            canonicalEntityStatus(store.catalog_, change.entity_type,
+                                  change.canonical_id) !=
+                CanonicalEntityStatus::Deprecated) {
+          throw std::invalid_argument(
+              "persisted catalog deprecation does not match the durable catalog");
+        }
+        break;
+      case CatalogChangeAction::Map:
+        if (change.related_canonical_id || !change.provider ||
+            !change.provider_id || change.provider->empty() ||
+            change.provider_id->empty() ||
+            !catalogMappingMatches(store.catalog_, change)) {
+          throw std::invalid_argument(
+              "persisted catalog mapping does not match the durable catalog");
+        }
+        if ((change.entity_type == CatalogEntityType::Competition ||
+             change.entity_type == CatalogEntityType::Season) &&
+            change.provider_match_id) {
+          throw std::invalid_argument(
+              "persisted competition or season mapping has a match scope");
+        }
+        break;
+      case CatalogChangeAction::Merge:
+        if (change.provider || change.provider_id ||
+            change.provider_match_id || !change.related_canonical_id ||
+            *change.related_canonical_id <= 0 ||
+            change.entity_type == CatalogEntityType::Match ||
+            !canonicalEntityExists(store.catalog_, change.entity_type,
+                                   *change.related_canonical_id) ||
+            canonicalEntityStatus(store.catalog_, change.entity_type,
+                                  change.canonical_id) !=
+                CanonicalEntityStatus::Merged ||
+            !canonicalIdsAgree(store.catalog_, change.entity_type,
+                               change.canonical_id,
+                               *change.related_canonical_id)) {
+          throw std::invalid_argument(
+              "persisted catalog merge does not match the durable catalog");
+        }
+        break;
     }
     previous_revision = change.revision;
     store.catalog_changes_.push_back(change);
@@ -479,6 +635,134 @@ void MatchReviewStore::mapPlayer(ProviderPlayerReference provider_player,
       canonical_player.value, catalog_.player(canonical_player)->name,
       std::move(provider), std::move(provider_id),
       std::move(provider_match_id), std::move(provenance));
+}
+
+void MatchReviewStore::renameCatalogEntity(
+    CatalogEntityType entity_type, Identifier canonical_id, std::string name,
+    ReviewProvenance provenance) {
+  if (entity_type == CatalogEntityType::Match) {
+    throw std::invalid_argument(
+        "canonical match labels cannot be renamed independently");
+  }
+  if (!canonicalEntityExists(catalog_, entity_type, canonical_id)) {
+    throw std::invalid_argument("cannot rename an unknown canonical " +
+                                std::string(catalogEntityTypeName(entity_type)) +
+                                " ID");
+  }
+  if (canonicalEntityName(catalog_, entity_type, canonical_id) == name) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      catalog_.renameCompetition({canonical_id}, std::move(name));
+      break;
+    case CatalogEntityType::Season:
+      catalog_.renameSeason({canonical_id}, std::move(name));
+      break;
+    case CatalogEntityType::Team:
+      catalog_.renameTeam({canonical_id}, std::move(name));
+      break;
+    case CatalogEntityType::Player:
+      catalog_.renamePlayer({canonical_id}, std::move(name));
+      break;
+    case CatalogEntityType::Match:
+      break;
+  }
+  recordCatalogChange(
+      CatalogChangeAction::Rename, entity_type, canonical_id,
+      canonicalEntityName(catalog_, entity_type, canonical_id), std::nullopt,
+      std::nullopt, std::nullopt, std::move(provenance));
+}
+
+void MatchReviewStore::deprecateCatalogEntity(
+    CatalogEntityType entity_type, Identifier canonical_id,
+    ReviewProvenance provenance) {
+  if (entity_type == CatalogEntityType::Match) {
+    throw std::invalid_argument(
+        "canonical match deprecation is not supported");
+  }
+  if (!canonicalEntityExists(catalog_, entity_type, canonical_id)) {
+    throw std::invalid_argument("cannot deprecate an unknown canonical " +
+                                std::string(catalogEntityTypeName(entity_type)) +
+                                " ID");
+  }
+  if (canonicalEntityStatus(catalog_, entity_type, canonical_id) ==
+      CanonicalEntityStatus::Deprecated) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto name =
+      canonicalEntityName(catalog_, entity_type, canonical_id);
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      catalog_.deprecateCompetition({canonical_id});
+      break;
+    case CatalogEntityType::Season:
+      catalog_.deprecateSeason({canonical_id});
+      break;
+    case CatalogEntityType::Team:
+      catalog_.deprecateTeam({canonical_id});
+      break;
+    case CatalogEntityType::Player:
+      catalog_.deprecatePlayer({canonical_id});
+      break;
+    case CatalogEntityType::Match:
+      break;
+  }
+  recordCatalogChange(CatalogChangeAction::Deprecate, entity_type,
+                      canonical_id, name, std::nullopt, std::nullopt,
+                      std::nullopt, std::move(provenance));
+}
+
+void MatchReviewStore::mergeCatalogEntity(
+    CatalogEntityType entity_type, Identifier source_canonical_id,
+    Identifier target_canonical_id, ReviewProvenance provenance) {
+  if (entity_type == CatalogEntityType::Match) {
+    throw std::invalid_argument("canonical match merging is not supported");
+  }
+  if (source_canonical_id == target_canonical_id) {
+    throw std::invalid_argument(
+        "canonical entity cannot be merged into itself");
+  }
+  if (!canonicalEntityExists(catalog_, entity_type, source_canonical_id) ||
+      !canonicalEntityExists(catalog_, entity_type, target_canonical_id)) {
+    throw std::invalid_argument(
+        "catalog merge requires existing source and target canonical IDs");
+  }
+  if (canonicalEntityStatus(catalog_, entity_type, source_canonical_id) ==
+          CanonicalEntityStatus::Merged &&
+      canonicalIdsAgree(catalog_, entity_type, source_canonical_id,
+                        target_canonical_id)) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto source_name =
+      canonicalEntityName(catalog_, entity_type, source_canonical_id);
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      catalog_.mergeCompetition({source_canonical_id},
+                                {target_canonical_id});
+      break;
+    case CatalogEntityType::Season:
+      catalog_.mergeSeason({source_canonical_id}, {target_canonical_id});
+      break;
+    case CatalogEntityType::Team:
+      catalog_.mergeTeam({source_canonical_id}, {target_canonical_id});
+      break;
+    case CatalogEntityType::Player:
+      catalog_.mergePlayer({source_canonical_id}, {target_canonical_id});
+      break;
+    case CatalogEntityType::Match:
+      break;
+  }
+  recordCatalogChange(
+      CatalogChangeAction::Merge, entity_type, source_canonical_id,
+      source_name, std::nullopt, std::nullopt, std::nullopt,
+      std::move(provenance), target_canonical_id);
 }
 
 std::vector<std::uint64_t> MatchReviewStore::addCandidates(
@@ -720,12 +1004,14 @@ void MatchReviewStore::recordCatalogChange(
     Identifier canonical_id, std::string canonical_name,
     std::optional<std::string> provider, std::optional<std::string> provider_id,
     std::optional<std::string> provider_match_id,
-    ReviewProvenance provenance) {
+    ReviewProvenance provenance,
+    std::optional<Identifier> related_canonical_id) {
   advanceRevision();
   catalog_changes_.push_back(
       {revision_, action, entity_type, canonical_id, std::move(canonical_name),
        std::move(provider), std::move(provider_id),
-       std::move(provider_match_id), std::move(provenance)});
+       std::move(provider_match_id), std::move(provenance),
+       related_canonical_id});
 }
 
 void MatchReviewStore::advanceRevision() {
@@ -771,6 +1057,12 @@ std::string_view catalogChangeActionName(CatalogChangeAction action) noexcept {
       return "add";
     case CatalogChangeAction::Map:
       return "map";
+    case CatalogChangeAction::Rename:
+      return "rename";
+    case CatalogChangeAction::Deprecate:
+      return "deprecate";
+    case CatalogChangeAction::Merge:
+      return "merge";
   }
   return "unknown";
 }
