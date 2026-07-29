@@ -70,6 +70,10 @@ ProviderMetadata StatsBombMetadataAdapter::loadMatches(
     const auto competition_id =
         required<Identifier>(competition, "competition_id", path, index);
     const auto season_id = required<Identifier>(season, "season_id", path, index);
+    const auto competition_name =
+        required<std::string>(competition, "competition_name", path, index);
+    const auto season_name =
+        required<std::string>(season, "season_name", path, index);
     const auto date = required<std::string>(record, "match_date", path, index);
     const auto kickoff = metadata_json::optional<std::string>(
         record, "kick_off", kProvider, path, index);
@@ -84,9 +88,9 @@ ProviderMetadata StatsBombMetadataAdapter::loadMatches(
     metadata.matches.push_back(
         {{std::string(kProvider), std::to_string(match_id)},
          std::to_string(competition_id),
-         required<std::string>(competition, "competition_name", path, index),
+         competition_name,
          std::to_string(season_id),
-         required<std::string>(season, "season_name", path, index),
+         season_name,
          kickoff ? std::optional<std::chrono::sys_seconds>{
                        metadata_json::parseDateAndTime(date, *kickoff, kProvider, path,
                                                        index)}
@@ -95,6 +99,13 @@ ProviderMetadata StatsBombMetadataAdapter::loadMatches(
          away.reference,
          home_score,
          away_score});
+    metadata.competitions.push_back(
+        {{std::string(kProvider), std::to_string(competition_id)},
+         competition_name});
+    metadata.seasons.push_back(
+        {{std::string(kProvider), std::to_string(season_id)},
+         {std::string(kProvider), std::to_string(competition_id)},
+         season_name});
     metadata.teams.push_back(std::move(home));
     metadata.teams.push_back(std::move(away));
   }

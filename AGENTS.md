@@ -32,7 +32,8 @@ Provider metadata follows a separate path:
 - `include/emberdb/identity`, `src/identity`: canonical entity catalogs and mappings
 - `include/emberdb/ingestion`, `src/ingestion`: adapter contracts and implementations
 - `include/emberdb/reconciliation`, `src/reconciliation`: explainable cross-provider
-  candidate comparison without automatic identity mutation
+  match and provider-to-canonical entity candidate comparison without automatic
+  identity mutation
 - `include/emberdb/persistence`, `src/persistence`: versioned identity and reconciliation
   review persistence, separate from event-table storage
 - `include/emberdb/storage`, `src/storage`: columnar storage

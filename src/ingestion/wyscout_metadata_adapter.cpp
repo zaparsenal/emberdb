@@ -55,7 +55,7 @@ ProviderMetadata WyscoutMetadataAdapter::loadCompetitions(
                                        "competition name must not be empty");
     }
     metadata.competitions.push_back(
-        {std::string(kProvider), std::to_string(id), name});
+        {{std::string(kProvider), std::to_string(id)}, name});
   }
   return metadata;
 }
@@ -193,6 +193,10 @@ ProviderMetadata WyscoutMetadataAdapter::loadMatches(
          *away_team,
          home_score,
          away_score});
+    metadata.seasons.push_back(
+        {{std::string(kProvider), std::to_string(season_id)},
+         {std::string(kProvider), std::to_string(competition_id)},
+         std::nullopt});
   }
   return metadata;
 }

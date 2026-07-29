@@ -13,6 +13,8 @@ Implemented milestones include:
   the open Wyscout research JSON adapters;
 - metadata adapters for StatsBomb matches/lineups and the open Wyscout competition,
   team, player, and match catalogs;
+- deterministic provider-to-canonical competition, season, team, and player candidate
+  generation with explicit name and parent-competition evidence;
 - deterministic match reconciliation candidates with per-field provenance, status, and
   confidence;
 - a durable review store for canonical catalogs, provider mappings, generated match
@@ -121,6 +123,26 @@ event; it does not overwrite the event's provider IDs. Audited catalog construct
 mapping APIs live on `MatchReviewStore`; each mutation records actor, source, reason,
 timestamp, and revision. A complete catalog and its audit records can be saved in the
 separate match review file. It is never embedded in an event `.ember` file.
+
+## Entity reconciliation
+
+`findEntityCandidates` stages provider competition, season, team, or player metadata
+against an existing canonical catalog without changing either side. It emits candidates
+only for case-insensitive, whitespace-normalized exact names. Similar or fuzzy names are
+not guessed.
+
+Competition, team, and player candidates retain the provider reference, canonical ID,
+both names, metadata source, and confidence. Season candidates additionally retain their
+provider competition reference. An existing provider-competition mapping must agree
+with the canonical season's parent; a conflict disqualifies the candidate, while a
+missing parent mapping remains visible as missing context. Duplicate provider records
+are collapsed only when their values agree; conflicting duplicates fail explicitly.
+Already-mapped provider identities are skipped.
+
+The programmatic API is declared in
+`include/emberdb/reconciliation/entity_reconciliation.h`. Durable entity candidate
+review and CLI commands are the next slice; candidate generation itself never creates a
+mapping.
 
 ## Match reconciliation
 

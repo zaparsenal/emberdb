@@ -11,9 +11,14 @@
 namespace emberdb {
 
 struct ProviderCompetitionMetadata {
-  std::string provider;
-  std::string id;
+  ProviderCompetitionReference reference;
   std::string name;
+};
+
+struct ProviderSeasonMetadata {
+  ProviderSeasonReference reference;
+  ProviderCompetitionReference competition;
+  std::optional<std::string> name;
 };
 
 struct ProviderTeamMetadata {
@@ -42,6 +47,7 @@ struct ProviderMatchMetadata {
 
 struct ProviderMetadata {
   std::vector<ProviderCompetitionMetadata> competitions;
+  std::vector<ProviderSeasonMetadata> seasons;
   std::vector<ProviderTeamMetadata> teams;
   std::vector<ProviderPlayerMetadata> players;
   std::vector<ProviderMatchMetadata> matches;
