@@ -276,6 +276,77 @@ if(BUILD_TESTING)
     DEPENDS "EmberDbCliPersistenceTest.QueriesDatabase;EmberDbCliPersistenceTest.AggregatesDatabase"
   )
 
+  set(EMBERDB_CLI_MANIFEST_STORE
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-manifest-store.json")
+  add_test(
+    NAME EmberDbCliManifestTest.PreparesStore
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+      ${EMBERDB_CLI_MANIFEST_STORE}
+      ${EMBERDB_CLI_MANIFEST_STORE}.tmp
+      ${EMBERDB_CLI_MANIFEST_STORE}.lock
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.DryRunsWithoutMutation
+    COMMAND emberdb_cli catalog import
+      --manifest ${CMAKE_CURRENT_SOURCE_DIR}/examples/catalog-manifest.json
+      --store ${EMBERDB_CLI_MANIFEST_STORE}
+      --dry-run
+  )
+  set_tests_properties(EmberDbCliManifestTest.DryRunsWithoutMutation PROPERTIES
+    DEPENDS EmberDbCliManifestTest.PreparesStore
+    PASS_REGULAR_EXPRESSION "Mode: dry-run"
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.VerifiesDryRunDidNotCreateStore
+    COMMAND emberdb_cli catalog list
+      --review ${EMBERDB_CLI_MANIFEST_STORE}
+  )
+  set_tests_properties(
+    EmberDbCliManifestTest.VerifiesDryRunDidNotCreateStore PROPERTIES
+    DEPENDS EmberDbCliManifestTest.DryRunsWithoutMutation
+    WILL_FAIL TRUE
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.AppliesAtomically
+    COMMAND emberdb_cli catalog import
+      --manifest ${CMAKE_CURRENT_SOURCE_DIR}/examples/catalog-manifest.json
+      --store ${EMBERDB_CLI_MANIFEST_STORE}
+  )
+  set_tests_properties(EmberDbCliManifestTest.AppliesAtomically PROPERTIES
+    DEPENDS EmberDbCliManifestTest.VerifiesDryRunDidNotCreateStore
+    PASS_REGULAR_EXPRESSION "Batch: applied"
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.ReimportsIdempotently
+    COMMAND emberdb_cli catalog import
+      --manifest ${CMAKE_CURRENT_SOURCE_DIR}/examples/catalog-manifest.json
+      --store ${EMBERDB_CLI_MANIFEST_STORE}
+  )
+  set_tests_properties(
+    EmberDbCliManifestTest.ReimportsIdempotently PROPERTIES
+    DEPENDS EmberDbCliManifestTest.AppliesAtomically
+    PASS_REGULAR_EXPRESSION "Create: 0"
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.ListsImportedCatalog
+    COMMAND emberdb_cli catalog list
+      --review ${EMBERDB_CLI_MANIFEST_STORE}
+  )
+  set_tests_properties(EmberDbCliManifestTest.ListsImportedCatalog PROPERTIES
+    DEPENDS EmberDbCliManifestTest.ReimportsIdempotently
+    PASS_REGULAR_EXPRESSION "match.100.Premier League.2023/2024.1.2"
+  )
+  add_test(
+    NAME EmberDbCliManifestTest.CleansStore
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+      ${EMBERDB_CLI_MANIFEST_STORE}
+      ${EMBERDB_CLI_MANIFEST_STORE}.tmp
+      ${EMBERDB_CLI_MANIFEST_STORE}.lock
+  )
+  set_tests_properties(EmberDbCliManifestTest.CleansStore PROPERTIES
+    DEPENDS EmberDbCliManifestTest.ListsImportedCatalog
+  )
+
   set(EMBERDB_CLI_CATALOG_REVIEW
       "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-catalog-review.json")
   add_test(

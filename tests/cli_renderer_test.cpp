@@ -169,6 +169,44 @@ TEST(CliRendererTest, RendersCatalogValidationCoverageAndDetails) {
             std::string::npos);
 }
 
+TEST(CliRendererTest, RendersDeterministicCatalogManifestReview) {
+  emberdb::CatalogManifestReport report;
+  report.base_revision = 4;
+  report.planned_revision = 5;
+  report.summary.create = 1;
+  report.summary.unchanged = 1;
+  report.results = {
+      {emberdb::CatalogEntityType::Team, 1, "North FC", std::nullopt,
+       std::nullopt, std::nullopt, emberdb::CatalogManifestAction::Create,
+       "", 0},
+      {emberdb::CatalogEntityType::Team, 1, "North FC", "StatsBomb", "10",
+       std::nullopt, emberdb::CatalogManifestAction::Unchanged,
+       "provider mapping already matches", 1}};
+  std::ostringstream output;
+
+  emberdb::cli::printCatalogManifestReport(output, report, true, false);
+
+  EXPECT_EQ(output.str(),
+            "Catalog manifest import\n"
+            "Mode: dry-run\n"
+            "Manifest version: 1\n"
+            "Store revision: 4\n"
+            "Planned revision: 5\n"
+            "Batch: ready\n"
+            "Create: 1\n"
+            "Unchanged: 1\n"
+            "Conflicts: 0\n"
+            "Invalid: 0\n"
+            "\n"
+            "team 1 North FC\n"
+            "  action: create\n"
+            "\n"
+            "team 1 North FC\n"
+            "  provider mapping: StatsBomb:10\n"
+            "  action: unchanged\n"
+            "  reason: provider mapping already matches\n");
+}
+
 TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   std::ostringstream output;
 
@@ -177,6 +215,8 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   EXPECT_NE(output.str().find("emberdb_cli import"), std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli query"), std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli reconcile generate"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog import"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli reconcile reject"),
             std::string::npos);

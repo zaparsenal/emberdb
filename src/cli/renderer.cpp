@@ -182,6 +182,8 @@ void printUsage(std::ostream& output) {
             "       emberdb_cli reconcile reject --review PATH --candidate-id ID "
             "--actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli catalog init --review PATH\n"
+            "       emberdb_cli catalog import --manifest PATH --store PATH "
+            "[--dry-run]\n"
             "       emberdb_cli catalog add --review PATH --entity ENTITY "
             "--canonical-id ID [ENTITY FIELDS] "
             "--actor TEXT --source TEXT --reason TEXT\n"
@@ -548,6 +550,43 @@ void printCatalogValidation(std::ostream& output,
            << evidenceStatusText(record.name_status) << '\t'
            << catalogValidationContextStatusName(record.context_status)
            << '\n';
+  }
+}
+
+void printCatalogManifestReport(std::ostream& output,
+                                const CatalogManifestReport& report,
+                                bool dry_run, bool applied) {
+  output << "Catalog manifest import\n"
+         << "Mode: " << (dry_run ? "dry-run" : "apply") << '\n'
+         << "Manifest version: " << report.manifest_version << '\n'
+         << "Store revision: " << report.base_revision << '\n'
+         << "Planned revision: " << report.planned_revision << '\n'
+         << "Batch: "
+         << (!report.importable() ? "rejected"
+                                  : (applied ? "applied" : "ready"))
+         << '\n'
+         << "Create: " << report.summary.create << '\n'
+         << "Unchanged: " << report.summary.unchanged << '\n'
+         << "Conflicts: " << report.summary.conflicts << '\n'
+         << "Invalid: " << report.summary.invalid << '\n';
+  for (const auto& result : report.results) {
+    output << '\n' << catalogEntityTypeName(result.entity_type) << ' '
+           << result.canonical_id;
+    if (!result.canonical_name.empty()) {
+      output << ' ' << result.canonical_name;
+    }
+    output << '\n';
+    if (result.provider && result.provider_id) {
+      output << "  provider mapping: "
+             << providerReferenceText(*result.provider, *result.provider_id,
+                                      result.provider_match_id)
+             << '\n';
+    }
+    output << "  action: " << catalogManifestActionName(result.action)
+           << '\n';
+    if (!result.reason.empty()) {
+      output << "  reason: " << result.reason << '\n';
+    }
   }
 }
 

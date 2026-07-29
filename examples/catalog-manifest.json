@@ -1,0 +1,140 @@
+{
+  "format": "emberdb-canonical-manifest",
+  "version": 1,
+  "competitions": [
+    {
+      "id": 20,
+      "name": "Premier League",
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "league registry",
+        "reason": "Create canonical competition"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "2",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb competitions",
+            "reason": "Verified provider competition"
+          }
+        }
+      ]
+    }
+  ],
+  "seasons": [
+    {
+      "id": 30,
+      "competition_id": 20,
+      "name": "2023/2024",
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "league registry",
+        "reason": "Create canonical season"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "44",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb competitions",
+            "reason": "Verified provider season"
+          }
+        }
+      ]
+    }
+  ],
+  "teams": [
+    {
+      "id": 1,
+      "name": "North FC",
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "league registry",
+        "reason": "Create home team"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "10",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb teams",
+            "reason": "Verified home team"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "South FC",
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "league registry",
+        "reason": "Create away team"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "20",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb teams",
+            "reason": "Verified away team"
+          }
+        }
+      ]
+    }
+  ],
+  "players": [
+    {
+      "id": 10,
+      "name": "Alex Forward",
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "club roster",
+        "reason": "Create canonical player"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "99",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb lineups",
+            "reason": "Verified provider player"
+          }
+        }
+      ]
+    }
+  ],
+  "matches": [
+    {
+      "id": 100,
+      "season_id": 30,
+      "home_team_id": 1,
+      "away_team_id": 2,
+      "kickoff_seconds": 1704067200,
+      "home_score": 2,
+      "away_score": 1,
+      "provenance": {
+        "author": "reviewer@example.com",
+        "source": "league fixture list",
+        "reason": "Create canonical match"
+      },
+      "mappings": [
+        {
+          "provider": "StatsBomb",
+          "provider_id": "12345",
+          "provenance": {
+            "author": "reviewer@example.com",
+            "source": "StatsBomb matches",
+            "reason": "Verified provider match"
+          }
+        }
+      ]
+    }
+  ]
+}

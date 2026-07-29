@@ -181,6 +181,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     const auto action = arguments[2];
     if (action == "init") {
       options.command = Command::CatalogInit;
+    } else if (action == "import") {
+      options.command = Command::CatalogImport;
     } else if (action == "add") {
       options.command = Command::CatalogAdd;
     } else if (action == "map") {
@@ -232,6 +234,13 @@ Options parseOptions(std::span<const std::string_view> arguments) {
 
   for (std::size_t index = first_option; index < arguments.size(); ++index) {
     const auto option = arguments[index];
+    if (option == "--dry-run") {
+      if (options.dry_run) {
+        throw std::runtime_error("--dry-run may only be specified once");
+      }
+      options.dry_run = true;
+      continue;
+    }
     if (index + 1 >= arguments.size()) {
       throw std::runtime_error("Missing value for " + std::string(option));
     }
@@ -279,6 +288,10 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       }
     } else if (option == "--review") {
       options.review = value;
+    } else if (option == "--manifest") {
+      options.manifest = value;
+    } else if (option == "--store") {
+      options.store = value;
     } else if (option == "--left-provider") {
       options.left_provider = value;
     } else if (option == "--left-input") {
@@ -359,8 +372,11 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::EntityCandidateReject;
   const bool is_catalog_validation =
       options.command == Command::CatalogValidate;
+  const bool is_catalog_import =
+      options.command == Command::CatalogImport;
   const bool is_catalog =
       options.command == Command::CatalogInit ||
+      is_catalog_import ||
       options.command == Command::CatalogAdd ||
       options.command == Command::CatalogMap ||
       options.command == Command::CatalogRename ||
@@ -378,6 +394,37 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.kickoff_seconds || options.home_score || options.away_score ||
       !options.provider_id.empty() || options.provider_match_id;
   if (is_catalog) {
+    if (is_catalog_import) {
+      const bool has_unrelated_options =
+          !options.review.empty() || !options.provider.empty() ||
+          options.has_match_id || !options.input.empty() ||
+          !options.output.empty() || !options.database.empty() ||
+          options.has_limit || !options.filters.empty() ||
+          !options.projection.empty() || !options.group_by.empty() ||
+          !options.aggregates.empty() ||
+          options.home_first_half_direction.has_value() ||
+          !options.left_provider.empty() || !options.left_input.empty() ||
+          !options.right_provider.empty() || !options.right_input.empty() ||
+          options.has_candidate_id || options.has_canonical_match_id ||
+          options.candidate_status || has_catalog_identity_options ||
+          !options.actor.empty() || !options.source.empty() ||
+          !options.reason.empty();
+      if (has_unrelated_options) {
+        throw std::runtime_error(
+            "catalog import accepts only --manifest, --store, and --dry-run");
+      }
+      if (options.manifest.empty() || options.store.empty()) {
+        throw std::runtime_error(
+            "catalog import requires --manifest and --store");
+      }
+      return options;
+    }
+    if (!options.manifest.empty() || !options.store.empty() ||
+        options.dry_run) {
+      throw std::runtime_error(
+          "--manifest, --store, and --dry-run are only valid for catalog "
+          "import");
+    }
     if (options.review.empty()) {
       throw std::runtime_error("--review is required for catalog commands");
     }
@@ -645,6 +692,13 @@ Options parseOptions(std::span<const std::string_view> arguments) {
           "--provider-match-id is only valid for team or player mappings");
     }
     return options;
+  }
+
+  if (!options.manifest.empty() || !options.store.empty() ||
+      options.dry_run) {
+    throw std::runtime_error(
+        "--manifest, --store, and --dry-run are only valid for catalog "
+        "import");
   }
 
   const bool is_reconciliation =
