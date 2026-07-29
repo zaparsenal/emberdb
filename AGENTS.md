@@ -156,6 +156,18 @@ Generate and review provider-to-canonical entity candidates:
   --reason "Verified provider identity"
 ```
 
+Run a read-only provider metadata coverage report:
+
+```bash
+./build/emberdb_cli catalog validate \
+  --review match-review.json --entity team \
+  --provider wyscout --input wyscout-teams.json
+```
+
+Catalog validation must remain deterministic and non-mutating. It reports explicit
+mapping coverage separately from normalized exact-name coverage and preserves missing,
+ambiguous, inactive, and season-parent conflict outcomes.
+
 ## Documentation discipline
 
 Keep `README.md`, this file, CLI help, tests, and CMake targets synchronized with implementation. Clearly label planned work as planned. When architecture, commands, schema semantics, coordinate conventions, or limitations change, update the relevant documentation in the same change.

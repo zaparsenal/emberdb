@@ -21,6 +21,7 @@
 #include "emberdb/persistence/match_review_file.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
+#include "emberdb/reconciliation/catalog_validation.h"
 #include "emberdb/reconciliation/entity_reconciliation.h"
 #include "emberdb/reconciliation/match_reconciliation.h"
 #include "emberdb/storage/football_event_file.h"
@@ -127,6 +128,7 @@ bool isCatalogCommand(Command command) {
          command == Command::CatalogMerge ||
          command == Command::CatalogList ||
          command == Command::CatalogHistory ||
+         command == Command::CatalogValidate ||
          isEntityCandidateCommand(command);
 }
 
@@ -202,6 +204,16 @@ void runCatalogCommand(const Options& options, std::ostream& output) {
   }
   if (options.command == Command::CatalogHistory) {
     printCatalogHistory(output, store.catalogChanges());
+    return;
+  }
+  if (options.command == Command::CatalogValidate) {
+    const auto entity_type = identityEntityType(*options.catalog_entity);
+    const auto metadata =
+        loadProviderEntities(options.provider, entity_type, options.input);
+    printCatalogValidation(
+        output,
+        validateCatalogMetadata(metadata, entity_type, store.catalog()),
+        store.revision());
     return;
   }
 

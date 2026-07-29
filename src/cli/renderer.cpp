@@ -127,6 +127,21 @@ std::string providerIdentityText(
                                reference.match_id);
 }
 
+std::string canonicalIdentifiersText(
+    const std::vector<Identifier>& identifiers) {
+  if (identifiers.empty()) {
+    return "NULL";
+  }
+  std::ostringstream output;
+  for (std::size_t index = 0; index < identifiers.size(); ++index) {
+    if (index != 0) {
+      output << ',';
+    }
+    output << identifiers[index];
+  }
+  return output.str();
+}
+
 void printEntityCandidateSummary(
     std::ostream& output, const EntityCandidateRecord& candidate) {
   const auto& result = candidate.reconciliation;
@@ -184,6 +199,9 @@ void printUsage(std::ostream& output) {
             "--actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli catalog list --review PATH\n"
             "       emberdb_cli catalog history --review PATH\n"
+            "       emberdb_cli catalog validate --review PATH "
+            "--entity competition|season|team|player "
+            "--provider PROVIDER --input PATH\n"
             "       emberdb_cli catalog candidates generate --review PATH "
             "--entity competition|season|team|player "
             "--provider PROVIDER --input PATH\n"
@@ -487,6 +505,49 @@ void printCatalogHistory(
            << change.provenance.source << '\t' << change.provenance.reason
            << '\t'
            << change.provenance.recorded_at.time_since_epoch().count() << '\n';
+  }
+}
+
+void printCatalogValidation(std::ostream& output,
+                            const CatalogValidationReport& report,
+                            std::uint64_t review_revision) {
+  const auto& summary = report.summary;
+  output << "Catalog validation: "
+         << identityEntityTypeName(report.entity_type) << '\n'
+         << "Review revision: " << review_revision << '\n'
+         << "Provider records: " << summary.provider_records << '\n'
+         << "Mapped active: " << summary.mapped_active << '\n'
+         << "Mapped inactive: " << summary.mapped_inactive << '\n'
+         << "Unmapped records: "
+         << summary.provider_records - summary.mapped_active -
+                summary.mapped_inactive
+         << '\n'
+         << "Unmapped exact matches: "
+         << summary.unmapped_exact_matches << '\n'
+         << "Ambiguous exact matches: "
+         << summary.ambiguous_exact_matches << '\n'
+         << "Inactive exact matches: "
+         << summary.inactive_exact_matches << '\n'
+         << "No exact matches: " << summary.no_exact_matches << '\n'
+         << "Missing names: " << summary.missing_names << '\n'
+         << "Mapped name mismatches: "
+         << summary.mapped_name_mismatches << '\n'
+         << "Parent context missing: "
+         << summary.parent_context_missing << '\n'
+         << "Parent context conflicts: "
+         << summary.parent_context_conflicts << '\n'
+         << "Parent context inactive: "
+         << summary.parent_context_inactive << '\n'
+         << "provider_reference\tprovider_name\toutcome\tcanonical_ids\t"
+            "name_status\tcontext_status\n";
+  for (const auto& record : report.records) {
+    output << providerIdentityText(record.provider_identity) << '\t'
+           << optionalText(record.provider_name) << '\t'
+           << catalogValidationOutcomeName(record.outcome) << '\t'
+           << canonicalIdentifiersText(record.canonical_ids) << '\t'
+           << evidenceStatusText(record.name_status) << '\t'
+           << catalogValidationContextStatusName(record.context_status)
+           << '\n';
   }
 }
 

@@ -272,6 +272,28 @@ TEST(CliCommandParserTest, ParsesCatalogMaintenanceOptions) {
   EXPECT_EQ(merge.target_canonical_id, 10);
 }
 
+TEST(CliCommandParserTest, ParsesReadOnlyCatalogValidationOptions) {
+  constexpr std::array arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"validate"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"team"},
+      std::string_view{"--provider"},
+      std::string_view{"wyscout"},
+      std::string_view{"--input"},
+      std::string_view{"teams.json"}};
+
+  const auto options = emberdb::cli::parseOptions(arguments);
+
+  EXPECT_EQ(options.command, emberdb::cli::Command::CatalogValidate);
+  EXPECT_EQ(options.catalog_entity, emberdb::CatalogEntityType::Team);
+  EXPECT_EQ(options.provider, "wyscout");
+  EXPECT_EQ(options.input, "teams.json");
+}
+
 TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
   constexpr std::array mixed_sources{
       std::string_view{"emberdb_cli"},
@@ -363,6 +385,23 @@ TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
       std::string_view{"Invalid merge"}};
   EXPECT_THROW(
       static_cast<void>(emberdb::cli::parseOptions(invalid_self_merge)),
+      std::runtime_error);
+
+  constexpr std::array invalid_catalog_validation{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"validate"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"match"},
+      std::string_view{"--provider"},
+      std::string_view{"statsbomb"},
+      std::string_view{"--input"},
+      std::string_view{"matches.json"}};
+  EXPECT_THROW(
+      static_cast<void>(
+          emberdb::cli::parseOptions(invalid_catalog_validation)),
       std::runtime_error);
 }
 

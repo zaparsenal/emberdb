@@ -19,25 +19,6 @@ bool blank(std::string_view value) {
   });
 }
 
-std::string normalizedName(std::string_view value) {
-  std::string normalized;
-  normalized.reserve(value.size());
-  bool pending_space = false;
-  for (const char character : value) {
-    const auto byte = static_cast<unsigned char>(character);
-    if (std::isspace(byte) != 0) {
-      pending_space = !normalized.empty();
-      continue;
-    }
-    if (pending_space) {
-      normalized.push_back(' ');
-      pending_space = false;
-    }
-    normalized.push_back(static_cast<char>(std::tolower(byte)));
-  }
-  return normalized;
-}
-
 std::string providerText(const ProviderCompetitionReference& reference) {
   return reference.provider + ":" + reference.id;
 }
@@ -131,8 +112,8 @@ std::vector<EntityReconciliation> findEntityCandidates(
           if (canonical.status != CanonicalEntityStatus::Active) {
             continue;
           }
-          if (normalizedName(provider->name) ==
-              normalizedName(canonical.name)) {
+          if (normalizeIdentityName(provider->name) ==
+              normalizeIdentityName(canonical.name)) {
             candidates.push_back(candidate(
                 entity_type,
                 {provider->reference.provider, provider->reference.id,
@@ -159,8 +140,8 @@ std::vector<EntityReconciliation> findEntityCandidates(
           if (canonical.status != CanonicalEntityStatus::Active) {
             continue;
           }
-          if (normalizedName(*provider->name) !=
-              normalizedName(canonical.name)) {
+          if (normalizeIdentityName(*provider->name) !=
+              normalizeIdentityName(canonical.name)) {
             continue;
           }
           EntityFieldEvidence context{
@@ -195,8 +176,8 @@ std::vector<EntityReconciliation> findEntityCandidates(
           if (canonical.status != CanonicalEntityStatus::Active) {
             continue;
           }
-          if (normalizedName(provider->name) ==
-              normalizedName(canonical.name)) {
+          if (normalizeIdentityName(provider->name) ==
+              normalizeIdentityName(canonical.name)) {
             candidates.push_back(candidate(
                 entity_type,
                 {provider->reference.provider, provider->reference.id,
@@ -219,8 +200,8 @@ std::vector<EntityReconciliation> findEntityCandidates(
           if (canonical.status != CanonicalEntityStatus::Active) {
             continue;
           }
-          if (normalizedName(provider->name) ==
-              normalizedName(canonical.name)) {
+          if (normalizeIdentityName(provider->name) ==
+              normalizeIdentityName(canonical.name)) {
             candidates.push_back(candidate(
                 entity_type,
                 {provider->reference.provider, provider->reference.id,
@@ -234,6 +215,25 @@ std::vector<EntityReconciliation> findEntityCandidates(
   }
   sortCandidates(candidates);
   return candidates;
+}
+
+std::string normalizeIdentityName(std::string_view value) {
+  std::string normalized;
+  normalized.reserve(value.size());
+  bool pending_space = false;
+  for (const char character : value) {
+    const auto byte = static_cast<unsigned char>(character);
+    if (std::isspace(byte) != 0) {
+      pending_space = !normalized.empty();
+      continue;
+    }
+    if (pending_space) {
+      normalized.push_back(' ');
+      pending_space = false;
+    }
+    normalized.push_back(static_cast<char>(std::tolower(byte)));
+  }
+  return normalized;
 }
 
 std::string_view identityEntityTypeName(
