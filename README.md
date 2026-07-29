@@ -164,6 +164,19 @@ cmake --build build
 
 For a release build, configure a separate directory with `-DCMAKE_BUILD_TYPE=Release`.
 
+AddressSanitizer and UndefinedBehaviorSanitizer can be enabled with Clang or GCC:
+
+```bash
+cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug \
+  -DEMBERDB_ENABLE_SANITIZERS=ON
+cmake --build build-sanitized
+ctest --test-dir build-sanitized --output-on-failure
+```
+
+GitHub Actions configures clean Debug and Release builds on Linux and macOS and runs the
+complete CTest suite for each. A separate Linux job runs the same suite with both
+sanitizers enabled.
+
 ## Tests
 
 ```bash

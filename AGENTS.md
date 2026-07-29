@@ -59,6 +59,15 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Run the sanitizer suite with:
+
+```bash
+cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug \
+  -DEMBERDB_ENABLE_SANITIZERS=ON
+cmake --build build-sanitized
+ctest --test-dir build-sanitized --output-on-failure
+```
+
 Run a fixture import with:
 
 ```bash
