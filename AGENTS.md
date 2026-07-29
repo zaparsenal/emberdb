@@ -36,7 +36,8 @@ Provider metadata follows a separate path:
 - `include/emberdb/persistence`, `src/persistence`: versioned identity and reconciliation
   review persistence, separate from event-table storage
 - `include/emberdb/storage`, `src/storage`: columnar storage
-- `src/main.cpp`: command-line boundary
+- `src/cli`: command parsing, execution orchestration, and terminal rendering
+- `src/main.cpp`: minimal process entry point and top-level error boundary
 - `tests`: offline unit tests and small fixtures
 - `scripts`: future dataset generation, validation, and benchmarks
 - `examples`, `data`: future examples and local data (do not commit large provider datasets)

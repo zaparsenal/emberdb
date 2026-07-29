@@ -53,8 +53,19 @@ endfunction()
 
 emberdb_enable_warnings(emberdb)
 
+add_library(emberdb_cli_support
+  src/cli/command_parser.cpp
+  src/cli/executor.cpp
+  src/cli/renderer.cpp
+)
+target_include_directories(emberdb_cli_support PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(emberdb_cli_support PUBLIC EmberDB::emberdb)
+emberdb_enable_warnings(emberdb_cli_support)
+
 add_executable(emberdb_cli src/main.cpp)
-target_link_libraries(emberdb_cli PRIVATE EmberDB::emberdb)
+target_link_libraries(emberdb_cli PRIVATE emberdb_cli_support)
 emberdb_enable_warnings(emberdb_cli)
 
 if(BUILD_TESTING)
@@ -70,6 +81,8 @@ if(BUILD_TESTING)
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
     tests/canonical_identity_test.cpp
+    tests/cli_command_parser_test.cpp
+    tests/cli_renderer_test.cpp
     tests/coordinate_normalization_test.cpp
     tests/football_event_validation_test.cpp
     tests/football_event_file_test.cpp
@@ -84,7 +97,11 @@ if(BUILD_TESTING)
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
   )
-  target_link_libraries(emberdb_tests PRIVATE EmberDB::emberdb GTest::gtest_main)
+  target_link_libraries(emberdb_tests PRIVATE
+    EmberDB::emberdb
+    emberdb_cli_support
+    GTest::gtest_main
+  )
   target_compile_definitions(emberdb_tests PRIVATE
     EMBERDB_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
   )

@@ -80,6 +80,11 @@ Raw provider files are confined to ingestion adapters. Storage and query executi
 accept only normalized events and do not depend on StatsBomb, Metrica, or Wyscout
 formats.
 
+The CLI is an internal composition layer rather than part of the database library.
+Command parsing and typed query construction, execution orchestration, and terminal
+rendering live in separate `src/cli` components; `src/main.cpp` only handles process
+arguments, top-level errors, and exit status.
+
 The current 22 logical columns are provider event ID, match ID, period, timestamp,
 minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
 normalized start x/y, normalized end x/y, provider, source start x/y, and source end x/y.
