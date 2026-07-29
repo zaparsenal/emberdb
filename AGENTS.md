@@ -110,6 +110,20 @@ Generate and review match reconciliation candidates from an existing review stor
 ./build/emberdb_cli reconcile inspect --review match-review.json --candidate-id 1
 ```
 
+Initialize and explicitly author a canonical identity review store with:
+
+```bash
+./build/emberdb_cli catalog init --review match-review.json
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity team --canonical-id 1 --name "Ember FC" \
+  --actor "reviewer@example.com" --source "provider team page" \
+  --reason "Create canonical team"
+./build/emberdb_cli catalog map --review match-review.json \
+  --entity team --canonical-id 1 --provider StatsBomb --provider-id 10 \
+  --actor "reviewer@example.com" --source "StatsBomb teams" \
+  --reason "Verified provider identity"
+```
+
 ## Documentation discipline
 
 Keep `README.md`, this file, CLI help, tests, and CMake targets synchronized with implementation. Clearly label planned work as planned. When architecture, commands, schema semantics, coordinate conventions, or limitations change, update the relevant documentation in the same change.

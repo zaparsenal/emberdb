@@ -60,6 +60,114 @@ FootballEventTable importTable(const Options& options) {
   return table;
 }
 
+ReviewProvenance reviewProvenance(const Options& options) {
+  return {options.actor, options.source, options.reason,
+          std::chrono::time_point_cast<std::chrono::seconds>(
+              std::chrono::system_clock::now())};
+}
+
+bool isCatalogCommand(Command command) {
+  return command == Command::CatalogInit ||
+         command == Command::CatalogAdd ||
+         command == Command::CatalogMap ||
+         command == Command::CatalogList ||
+         command == Command::CatalogHistory;
+}
+
+void runCatalogCommand(const Options& options, std::ostream& output) {
+  if (options.command == Command::CatalogInit) {
+    const MatchReviewStore store;
+    createMatchReviewStore(store, options.review);
+    printCatalogCreated(output, options.review);
+    return;
+  }
+  auto store = loadMatchReviewStore(options.review);
+  if (options.command == Command::CatalogList) {
+    printCatalogSummary(output, store);
+    return;
+  }
+  if (options.command == Command::CatalogHistory) {
+    printCatalogHistory(output, store.catalogChanges());
+    return;
+  }
+
+  const auto loaded_revision = store.revision();
+  const auto previous_change_count = store.catalogChanges().size();
+  auto provenance = reviewProvenance(options);
+  if (options.command == Command::CatalogAdd) {
+    switch (*options.catalog_entity) {
+      case CatalogEntityType::Competition:
+        store.addCompetition({{options.canonical_id}, options.name},
+                             std::move(provenance));
+        break;
+      case CatalogEntityType::Season:
+        store.addSeason({{options.canonical_id}, {options.competition_id},
+                         options.name},
+                        std::move(provenance));
+        break;
+      case CatalogEntityType::Team:
+        store.addTeam({{options.canonical_id}, options.name},
+                      std::move(provenance));
+        break;
+      case CatalogEntityType::Player:
+        store.addPlayer({{options.canonical_id}, options.name},
+                        std::move(provenance));
+        break;
+      case CatalogEntityType::Match: {
+        const auto kickoff =
+            options.kickoff_seconds
+                ? std::optional<std::chrono::sys_seconds>{
+                      std::chrono::sys_seconds{
+                          std::chrono::seconds{*options.kickoff_seconds}}}
+                : std::nullopt;
+        store.addMatch(
+            {{options.canonical_id},
+             options.competition,
+             options.season,
+             kickoff,
+             {options.home_team_id},
+             {options.away_team_id},
+             options.home_score,
+             options.away_score},
+            std::move(provenance));
+        break;
+      }
+    }
+  } else {
+    switch (*options.catalog_entity) {
+      case CatalogEntityType::Competition:
+        store.mapCompetition({options.provider, options.provider_id},
+                             {options.canonical_id},
+                             std::move(provenance));
+        break;
+      case CatalogEntityType::Season:
+        store.mapSeason({options.provider, options.provider_id},
+                        {options.canonical_id}, std::move(provenance));
+        break;
+      case CatalogEntityType::Team:
+        store.mapTeam(
+            {options.provider, options.provider_id, options.provider_match_id},
+            {options.canonical_id}, std::move(provenance));
+        break;
+      case CatalogEntityType::Player:
+        store.mapPlayer(
+            {options.provider, options.provider_id, options.provider_match_id},
+            {options.canonical_id}, std::move(provenance));
+        break;
+      case CatalogEntityType::Match:
+        throw std::runtime_error(
+            "Internal error: catalog map cannot map matches");
+    }
+  }
+
+  const CatalogChangeRecord* change = nullptr;
+  if (store.catalogChanges().size() != previous_change_count) {
+    change = &store.catalogChanges().back();
+    saveMatchReviewStore(store, options.review, loaded_revision);
+  }
+  printCatalogMutation(output, store.revision(), change);
+}
+
 void runReconciliationCommand(const Options& options, std::ostream& output) {
   auto store = loadMatchReviewStore(options.review);
   const auto loaded_revision = store.revision();
@@ -93,10 +201,7 @@ void runReconciliationCommand(const Options& options, std::ostream& output) {
     return;
   }
   if (options.command == Command::ReconcileAccept) {
-    const ReviewProvenance provenance{
-        options.actor, options.source, options.reason,
-        std::chrono::time_point_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now())};
+    const auto provenance = reviewProvenance(options);
     store.accept(options.candidate_id, {options.canonical_match_id},
                  provenance);
     saveMatchReviewStore(store, options.review, loaded_revision);
@@ -104,10 +209,7 @@ void runReconciliationCommand(const Options& options, std::ostream& output) {
                            options.canonical_match_id);
     return;
   }
-  const ReviewProvenance provenance{
-      options.actor, options.source, options.reason,
-      std::chrono::time_point_cast<std::chrono::seconds>(
-          std::chrono::system_clock::now())};
+  const auto provenance = reviewProvenance(options);
   store.reject(options.candidate_id, provenance);
   saveMatchReviewStore(store, options.review, loaded_revision);
   printCandidateRejected(output, options.candidate_id, options.reason);
@@ -116,6 +218,10 @@ void runReconciliationCommand(const Options& options, std::ostream& output) {
 }  // namespace
 
 void executeCommand(const Options& options, std::ostream& output) {
+  if (isCatalogCommand(options.command)) {
+    runCatalogCommand(options, output);
+    return;
+  }
   if (options.command != Command::Import && options.command != Command::Query) {
     runReconciliationCommand(options, output);
     return;

@@ -20,7 +20,12 @@ enum class Command {
   ReconcileList,
   ReconcileInspect,
   ReconcileAccept,
-  ReconcileReject
+  ReconcileReject,
+  CatalogInit,
+  CatalogAdd,
+  CatalogMap,
+  CatalogList,
+  CatalogHistory
 };
 
 struct Options {
@@ -48,6 +53,23 @@ struct Options {
   Identifier canonical_match_id{};
   bool has_canonical_match_id{};
   std::optional<MatchCandidateStatus> candidate_status;
+  std::optional<CatalogEntityType> catalog_entity;
+  Identifier canonical_id{};
+  bool has_canonical_id{};
+  std::string name;
+  Identifier competition_id{};
+  bool has_competition_id{};
+  std::string competition;
+  std::string season;
+  Identifier home_team_id{};
+  bool has_home_team_id{};
+  Identifier away_team_id{};
+  bool has_away_team_id{};
+  std::optional<std::int64_t> kickoff_seconds;
+  std::optional<std::int32_t> home_score;
+  std::optional<std::int32_t> away_score;
+  std::string provider_id;
+  std::optional<std::string> provider_match_id;
   std::string actor;
   std::string source;
   std::string reason;

@@ -62,6 +62,28 @@ TEST(CliRendererTest, RendersCandidateDecisionProvenance) {
             std::string::npos);
 }
 
+TEST(CliRendererTest, RendersCatalogSummaryAndAuditHistory) {
+  emberdb::MatchReviewStore store;
+  const emberdb::ReviewProvenance provenance{
+      "reviewer", "provider catalog", "Verified identity",
+      std::chrono::sys_seconds{std::chrono::seconds{1'700'000'000}}};
+  store.addCompetition({{20}, "Premier League"}, provenance);
+  store.mapCompetition({"StatsBomb", "2"}, {20}, provenance);
+  std::ostringstream summary;
+  std::ostringstream history;
+
+  emberdb::cli::printCatalogSummary(summary, store);
+  emberdb::cli::printCatalogHistory(history, store.catalogChanges());
+
+  EXPECT_NE(summary.str().find("Review revision: 2"), std::string::npos);
+  EXPECT_NE(summary.str().find("competition\tStatsBomb:2\t20"),
+            std::string::npos);
+  EXPECT_NE(history.str().find("2\tmap\tcompetition\t20"),
+            std::string::npos);
+  EXPECT_NE(history.str().find("reviewer\tprovider catalog\tVerified identity"),
+            std::string::npos);
+}
+
 TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   std::ostringstream output;
 
@@ -72,6 +94,9 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   EXPECT_NE(output.str().find("emberdb_cli reconcile generate"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli reconcile reject"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog init"), std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog history"),
             std::string::npos);
 }
 

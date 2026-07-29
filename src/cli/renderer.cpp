@@ -76,6 +76,16 @@ std::string providerMatchText(const ProviderMatchReference& reference) {
   return reference.provider + ":" + reference.id;
 }
 
+std::string providerReferenceText(
+    const std::string& provider, const std::string& id,
+    const std::optional<std::string>& match_id = std::nullopt) {
+  auto result = provider + ":" + id;
+  if (match_id) {
+    result += "@" + *match_id;
+  }
+  return result;
+}
+
 std::string_view evidenceStatusText(ReconciliationStatus status) {
   switch (status) {
     case ReconciliationStatus::Missing:
@@ -126,7 +136,17 @@ void printUsage(std::ostream& output) {
             "       emberdb_cli reconcile accept --review PATH --candidate-id ID "
             "--canonical-match-id ID --actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli reconcile reject --review PATH --candidate-id ID "
-            "--actor TEXT --source TEXT --reason TEXT\n";
+            "--actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog init --review PATH\n"
+            "       emberdb_cli catalog add --review PATH --entity ENTITY "
+            "--canonical-id ID [ENTITY FIELDS] "
+            "--actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog map --review PATH --entity ENTITY "
+            "--canonical-id ID --provider PROVIDER --provider-id ID "
+            "[--provider-match-id ID] "
+            "--actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog list --review PATH\n"
+            "       emberdb_cli catalog history --review PATH\n";
 }
 
 void printImportResult(std::ostream& output, const FootballEventTable& table,
@@ -255,6 +275,110 @@ void printCandidateAccepted(std::ostream& output, std::uint64_t candidate_id,
 void printCandidateRejected(std::ostream& output, std::uint64_t candidate_id,
                             const std::string& reason) {
   output << "Rejected candidate " << candidate_id << ": " << reason << '\n';
+}
+
+void printCatalogCreated(std::ostream& output,
+                         const std::filesystem::path& path) {
+  output << "Created match review store: " << path.string() << '\n'
+         << "Review revision: 0\n";
+}
+
+void printCatalogSummary(std::ostream& output,
+                         const MatchReviewStore& store) {
+  const auto& catalog = store.catalog();
+  output << "Review revision: " << store.revision() << '\n'
+         << "Competitions: " << catalog.competitions().size() << '\n';
+  for (const auto& [id, competition] : catalog.competitions()) {
+    output << "competition\t" << id.value << '\t' << competition.name << '\n';
+  }
+  output << "Seasons: " << catalog.seasons().size() << '\n';
+  for (const auto& [id, season] : catalog.seasons()) {
+    output << "season\t" << id.value << '\t' << season.competition_id.value
+           << '\t' << season.name << '\n';
+  }
+  output << "Teams: " << catalog.teams().size() << '\n';
+  for (const auto& [id, team] : catalog.teams()) {
+    output << "team\t" << id.value << '\t' << team.name << '\n';
+  }
+  output << "Players: " << catalog.players().size() << '\n';
+  for (const auto& [id, player] : catalog.players()) {
+    output << "player\t" << id.value << '\t' << player.name << '\n';
+  }
+  output << "Matches: " << catalog.matches().size() << '\n';
+  for (const auto& [id, match] : catalog.matches()) {
+    output << "match\t" << id.value << '\t' << match.competition << '\t'
+           << match.season << '\t' << match.home_team_id.value << '\t'
+           << match.away_team_id.value << '\n';
+  }
+  output << "Provider mappings:\n";
+  for (const auto& [reference, id] : catalog.competitionMappings()) {
+    output << "competition\t"
+           << providerReferenceText(reference.provider, reference.id) << '\t'
+           << id.value << '\n';
+  }
+  for (const auto& [reference, id] : catalog.seasonMappings()) {
+    output << "season\t"
+           << providerReferenceText(reference.provider, reference.id) << '\t'
+           << id.value << '\n';
+  }
+  for (const auto& [reference, id] : catalog.teamMappings()) {
+    output << "team\t"
+           << providerReferenceText(reference.provider, reference.id,
+                                    reference.match_id)
+           << '\t' << id.value << '\n';
+  }
+  for (const auto& [reference, id] : catalog.playerMappings()) {
+    output << "player\t"
+           << providerReferenceText(reference.provider, reference.id,
+                                    reference.match_id)
+           << '\t' << id.value << '\n';
+  }
+  for (const auto& [reference, id] : catalog.matchMappings()) {
+    output << "match\t"
+           << providerReferenceText(reference.provider, reference.id) << '\t'
+           << id.value << '\n';
+  }
+}
+
+void printCatalogHistory(
+    std::ostream& output,
+    const std::vector<CatalogChangeRecord>& catalog_changes) {
+  output << "Catalog changes: " << catalog_changes.size() << '\n'
+         << "revision\taction\tentity\tcanonical_id\tcanonical_name\t"
+            "provider_reference\tactor\tsource\treason\trecorded_at\n";
+  for (const auto& change : catalog_changes) {
+    const auto provider_reference =
+        change.provider && change.provider_id
+            ? providerReferenceText(*change.provider, *change.provider_id,
+                                    change.provider_match_id)
+            : "NULL";
+    output << change.revision << '\t'
+           << catalogChangeActionName(change.action) << '\t'
+           << catalogEntityTypeName(change.entity_type) << '\t'
+           << change.canonical_id << '\t' << change.canonical_name << '\t'
+           << provider_reference << '\t' << change.provenance.actor << '\t'
+           << change.provenance.source << '\t' << change.provenance.reason
+           << '\t'
+           << change.provenance.recorded_at.time_since_epoch().count() << '\n';
+  }
+}
+
+void printCatalogMutation(std::ostream& output, std::uint64_t revision,
+                          const CatalogChangeRecord* change) {
+  if (change == nullptr) {
+    output << "Catalog unchanged at revision " << revision << '\n';
+    return;
+  }
+  output << "Catalog revision " << revision << ": "
+         << catalogChangeActionName(change->action) << ' '
+         << catalogEntityTypeName(change->entity_type) << ' '
+         << change->canonical_id;
+  if (change->provider && change->provider_id) {
+    output << " <- "
+           << providerReferenceText(*change->provider, *change->provider_id,
+                                    change->provider_match_id);
+  }
+  output << '\n';
 }
 
 }  // namespace emberdb::cli

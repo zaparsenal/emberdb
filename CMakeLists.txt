@@ -269,6 +269,169 @@ if(BUILD_TESTING)
     DEPENDS "EmberDbCliPersistenceTest.QueriesDatabase;EmberDbCliPersistenceTest.AggregatesDatabase"
   )
 
+  set(EMBERDB_CLI_CATALOG_REVIEW
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-catalog-review.json")
+  add_test(
+    NAME EmberDbCliCatalogTest.PreparesReview
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+      ${EMBERDB_CLI_CATALOG_REVIEW}
+      ${EMBERDB_CLI_CATALOG_REVIEW}.tmp
+      ${EMBERDB_CLI_CATALOG_REVIEW}.lock
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.InitializesReview
+    COMMAND emberdb_cli catalog init --review ${EMBERDB_CLI_CATALOG_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCatalogTest.InitializesReview PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.PreparesReview
+    PASS_REGULAR_EXPRESSION "Review revision: 0"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsCompetition
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity competition --canonical-id 20 --name "Premier League"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create competition"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsCompetition PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.InitializesReview
+    PASS_REGULAR_EXPRESSION "Catalog revision 1: add competition 20"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsSeason
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity season --canonical-id 30 --competition-id 20
+      --name "2017/2018"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create season"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsSeason PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsCompetition
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsHomeTeam
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --canonical-id 1 --name "Arsenal"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create home team"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsHomeTeam PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsSeason
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsAwayTeam
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --canonical-id 2 --name "Leicester City"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create away team"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsAwayTeam PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsHomeTeam
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsPlayer
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 10 --name "Alex Forward"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create player"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsPlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsAwayTeam
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AddsMatch
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity match --canonical-id 100
+      --competition "Premier League" --season "2017/2018"
+      --home-team-id 1 --away-team-id 2
+      --home-score 4 --away-score 3
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create match"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsMatch PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsPlayer
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MapsCompetition
+    COMMAND emberdb_cli catalog map
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity competition --canonical-id 20
+      --provider StatsBomb --provider-id 2
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Map competition"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MapsCompetition PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsMatch
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MapsSeason
+    COMMAND emberdb_cli catalog map
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity season --canonical-id 30
+      --provider StatsBomb --provider-id 44
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Map season"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MapsSeason PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsCompetition
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MapsTeam
+    COMMAND emberdb_cli catalog map
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --canonical-id 1
+      --provider StatsBomb --provider-id 10
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Map team"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MapsTeam PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsSeason
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MapsMatchLocalPlayer
+    COMMAND emberdb_cli catalog map
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 10
+      --provider Metrica --provider-id Player1 --provider-match-id 42
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Map player"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MapsMatchLocalPlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsTeam
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsCatalog
+    COMMAND emberdb_cli catalog list --review ${EMBERDB_CLI_CATALOG_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ListsCatalog PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsMatchLocalPlayer
+    PASS_REGULAR_EXPRESSION "player.Metrica:Player1@42.10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsHistory
+    COMMAND emberdb_cli catalog history --review ${EMBERDB_CLI_CATALOG_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ListsHistory PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsCatalog
+    PASS_REGULAR_EXPRESSION "Catalog changes: 10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.CleansReview
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+      ${EMBERDB_CLI_CATALOG_REVIEW}
+      ${EMBERDB_CLI_CATALOG_REVIEW}.tmp
+      ${EMBERDB_CLI_CATALOG_REVIEW}.lock
+  )
+  set_tests_properties(EmberDbCliCatalogTest.CleansReview PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsHistory
+  )
+
   set(EMBERDB_CLI_REJECT_REVIEW
       "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-reject-review.json")
   set(EMBERDB_CLI_ACCEPT_REVIEW

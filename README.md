@@ -17,6 +17,8 @@ Implemented milestones include:
   confidence;
 - a durable review store for canonical catalogs, provider mappings, generated match
   candidates, evidence, and accepted or rejected decisions;
+- audited catalog CLI commands to initialize a review store, add canonical entities,
+  map provider identities, and inspect current state or change history;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
   candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
@@ -345,14 +347,75 @@ no matching rows returns no rows.
 The programmatic aggregation API is declared in
 `include/emberdb/query/aggregation_query.h`.
 
+## Catalog authoring CLI
+
+Create an empty review store:
+
+```bash
+./build/emberdb_cli catalog init --review match-review.json
+```
+
+Add canonical entities one at a time. Every mutation requires an actor, evidence source,
+and reason; EmberDB records those values with the current UTC timestamp and resulting
+store revision.
+
+```bash
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity competition --canonical-id 20 --name "Premier League" \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Create canonical competition"
+
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity season --canonical-id 30 --competition-id 20 --name "2023/2024" \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Create canonical season"
+
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity team --canonical-id 1 --name "Arsenal" \
+  --actor "reviewer@example.com" --source "provider team pages" \
+  --reason "Create canonical team"
+```
+
+`competition`, `team`, and `player` additions require `--name`. A `season` also
+requires `--competition-id`. A `match` requires `--competition`, `--season`,
+`--home-team-id`, and `--away-team-id`; `--kickoff-seconds` is optional and
+`--home-score`/`--away-score` must appear together.
+
+Map provider identities only after the canonical target exists:
+
+```bash
+./build/emberdb_cli catalog map --review match-review.json \
+  --entity competition --canonical-id 20 \
+  --provider StatsBomb --provider-id 2 \
+  --actor "reviewer@example.com" --source "StatsBomb competitions.json" \
+  --reason "Verified provider competition"
+
+./build/emberdb_cli catalog map --review match-review.json \
+  --entity player --canonical-id 10 \
+  --provider Metrica --provider-id Player1 --provider-match-id 42 \
+  --actor "reviewer@example.com" --source "match lineup" \
+  --reason "Verified match-local player"
+```
+
+`--provider-match-id` is allowed only for match-local team or player references.
+Provider match mappings remain owned by accepted reconciliation decisions.
+Repeating an identical mapping is a no-op and does not consume a revision.
+
+Review the complete canonical catalog and mappings, or the append-only authoring
+history:
+
+```bash
+./build/emberdb_cli catalog list --review match-review.json
+./build/emberdb_cli catalog history --review match-review.json
+```
+
 ## Match reconciliation review CLI
 
-The review CLI operates on an existing versioned review store. Catalog authoring remains
-explicit and programmatic: construct a `CanonicalIdentityCatalog`, pass it to
-`MatchReviewStore`, and call `createMatchReviewStore` once to create the initial file.
-The APIs are declared in `include/emberdb/reconciliation/match_review.h` and
-`include/emberdb/persistence/match_review_file.h`. This keeps provider identity
-decisions out of command-line heuristics.
+The reconciliation CLI operates on an existing versioned review store created and
+populated through the catalog commands or the equivalent APIs in
+`include/emberdb/reconciliation/match_review.h` and
+`include/emberdb/persistence/match_review_file.h`. Provider identity decisions always
+remain explicit; the CLI does not infer mappings from similar names.
 
 Generate qualified candidates from StatsBomb and Wyscout match metadata:
 
@@ -526,9 +589,9 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - The Wyscout event CLI reads the open 2019 research export only and does not
   automatically join the separately supported player, team, competition, or match
   metadata files.
-- Canonical catalog authoring and provider mapping edits are still programmatic. The
-  reconciliation CLI expects an existing review store and deliberately does not infer
-  team, player, competition, or season identity.
+- Catalog authoring is intentionally one explicit entity or mapping per command. There
+  is no bulk canonical manifest import or metadata-assisted team/player/competition/
+  season candidate review yet.
 - Match candidate generation through the CLI currently supports StatsBomb and Wyscout
   metadata. There is no automatic candidate acceptance.
 - Accepted match mappings do not yet reconcile or rewrite football events.
@@ -538,9 +601,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is an explicit catalog-authoring and entity-review
-workflow for provider metadata: import canonical catalog inputs, manage team/player plus
-competition/season mappings, and review those identity decisions with the same durable
-audit discipline. Event reconciliation should remain deferred until those prerequisite
-entities are durable and explainable. SQL is also deliberately deferred; when resumed,
-it should translate into the existing typed operations rather than bypassing them.
+The recommended next milestone is metadata-assisted entity candidate review: stage
+provider competition, season, team, and player metadata; generate explainable candidates
+without mutating mappings; and accept or reject those candidates into the existing
+revisioned audit store. A small bulk canonical-manifest importer can follow once its
+validation and provenance rules are defined. Event reconciliation should remain
+deferred until those prerequisite identities have been exercised on real provider
+catalogs. SQL is also deliberately deferred; when resumed, it should translate into the
+existing typed operations rather than bypassing them.
