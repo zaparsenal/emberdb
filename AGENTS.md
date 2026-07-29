@@ -19,6 +19,8 @@ Provider metadata follows a separate path:
 - Canonical match, team, and player identity stays separate from provider event fields;
   mappings must be explicit until a reconciliation milestone defines otherwise.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
+- Route normalized events through `validateFootballEvent`; adapters should add provider
+  record context to validation failures rather than duplicating provider-neutral rules.
 - Normalized coordinates use EmberDB's 0–100 by 0–100 pitch with attacks running left to right. Preserve provider coordinates in the `source_*` columns and validate bounds in each adapter.
 - Keep components small and owned through values or RAII. Avoid global mutable state.
 - Do not add SQL, persistence, compression, multithreading, SIMD, memory mapping, new providers, web services, or cloud infrastructure until a milestone requires them.
@@ -34,7 +36,8 @@ Provider metadata follows a separate path:
 - `include/emberdb/persistence`, `src/persistence`: versioned identity and reconciliation
   review persistence, separate from event-table storage
 - `include/emberdb/storage`, `src/storage`: columnar storage
-- `src/main.cpp`: command-line boundary
+- `src/cli`: command parsing, execution orchestration, and terminal rendering
+- `src/main.cpp`: minimal process entry point and top-level error boundary
 - `tests`: offline unit tests and small fixtures
 - `scripts`: future dataset generation, validation, and benchmarks
 - `examples`, `data`: future examples and local data (do not commit large provider datasets)
@@ -54,6 +57,15 @@ Provider metadata follows a separate path:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+Run the sanitizer suite with:
+
+```bash
+cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug \
+  -DEMBERDB_ENABLE_SANITIZERS=ON
+cmake --build build-sanitized
+ctest --test-dir build-sanitized --output-on-failure
 ```
 
 Run a fixture import with:

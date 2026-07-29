@@ -85,6 +85,26 @@ TEST(FootballEventTableTest, PreservesNullColumns) {
   EXPECT_EQ(table.playerDataCount(), 0U);
 }
 
+TEST(FootballEventTableTest, CountsPlayerNamesWithoutProviderPlayerIds) {
+  auto event = completeEvent();
+  event.player_id.reset();
+
+  emberdb::FootballEventTable table;
+  table.append(event);
+
+  EXPECT_EQ(table.playerDataCount(), 1U);
+}
+
+TEST(FootballEventTableTest, RejectsInvalidEventSemanticsBeforeInsertion) {
+  auto event = completeEvent();
+  event.event_type.clear();
+
+  emberdb::FootballEventTable table;
+  EXPECT_THROW(table.append(event), std::invalid_argument);
+  EXPECT_EQ(table.rowCount(), 0U);
+  EXPECT_TRUE(table.validate());
+}
+
 TEST(FootballEventTableTest, RejectsOutOfRangeRows) {
   const emberdb::FootballEventTable table;
   EXPECT_THROW(static_cast<void>(table.row(0)), std::out_of_range);

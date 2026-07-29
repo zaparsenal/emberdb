@@ -235,6 +235,11 @@ FootballEvent normalize(const std::vector<std::string>& fields, const Header& he
   event.end_location = normalizeMetricaCoordinate(
       event.source_end_location, direction, "end", row);
   event.provider = "Metrica";
+  try {
+    validateFootballEvent(event);
+  } catch (const std::invalid_argument& error) {
+    throw rowError(row, error.what());
+  }
   return event;
 }
 

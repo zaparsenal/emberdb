@@ -5,9 +5,25 @@ project(EmberDB VERSION 0.1.0 LANGUAGES CXX)
 include(CTest)
 include(FetchContent)
 
+option(EMBERDB_ENABLE_SANITIZERS
+       "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(EMBERDB_ENABLE_SANITIZERS)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options(
+      -fsanitize=address,undefined
+      -fno-omit-frame-pointer
+    )
+    add_link_options(-fsanitize=address,undefined)
+  else()
+    message(FATAL_ERROR
+      "EMBERDB_ENABLE_SANITIZERS requires a Clang or GCC-compatible compiler")
+  endif()
+endif()
 
 FetchContent_Declare(
   nlohmann_json
@@ -19,6 +35,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(emberdb
   src/common/coordinate_normalization.cpp
+  src/common/football_event.cpp
   src/common/football_event_column.cpp
   src/identity/canonical_identity.cpp
   src/ingestion/metrica_event_adapter.cpp
@@ -52,8 +69,19 @@ endfunction()
 
 emberdb_enable_warnings(emberdb)
 
+add_library(emberdb_cli_support
+  src/cli/command_parser.cpp
+  src/cli/executor.cpp
+  src/cli/renderer.cpp
+)
+target_include_directories(emberdb_cli_support PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(emberdb_cli_support PUBLIC EmberDB::emberdb)
+emberdb_enable_warnings(emberdb_cli_support)
+
 add_executable(emberdb_cli src/main.cpp)
-target_link_libraries(emberdb_cli PRIVATE EmberDB::emberdb)
+target_link_libraries(emberdb_cli PRIVATE emberdb_cli_support)
 emberdb_enable_warnings(emberdb_cli)
 
 if(BUILD_TESTING)
@@ -69,7 +97,10 @@ if(BUILD_TESTING)
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
     tests/canonical_identity_test.cpp
+    tests/cli_command_parser_test.cpp
+    tests/cli_renderer_test.cpp
     tests/coordinate_normalization_test.cpp
+    tests/football_event_validation_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
     tests/match_review_file_test.cpp
@@ -82,7 +113,11 @@ if(BUILD_TESTING)
     tests/football_event_table_test.cpp
     tests/event_query_test.cpp
   )
-  target_link_libraries(emberdb_tests PRIVATE EmberDB::emberdb GTest::gtest_main)
+  target_link_libraries(emberdb_tests PRIVATE
+    EmberDB::emberdb
+    emberdb_cli_support
+    GTest::gtest_main
+  )
   target_compile_definitions(emberdb_tests PRIVATE
     EMBERDB_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
   )
@@ -130,6 +165,18 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.ImportsAndQueriesMetricaFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Metrica"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.CountsMetricaPlayerNames
+    COMMAND emberdb_cli import
+      --provider metrica
+      --match-id 42
+      --home-first-half-direction left-to-right
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/metrica_events.csv
+  )
+  set_tests_properties(EmberDbCliTest.CountsMetricaPlayerNames PROPERTIES
+    PASS_REGULAR_EXPRESSION "Events with player data: 3"
   )
 
   add_test(

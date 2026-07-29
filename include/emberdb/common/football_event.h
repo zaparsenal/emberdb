@@ -48,4 +48,6 @@ struct FootballEvent {
   std::optional<Coordinate> source_end_location;
 };
 
+void validateFootballEvent(const FootballEvent& event);
+
 }  // namespace emberdb

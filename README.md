@@ -80,9 +80,21 @@ Raw provider files are confined to ingestion adapters. Storage and query executi
 accept only normalized events and do not depend on StatsBomb, Metrica, or Wyscout
 formats.
 
+The CLI is an internal composition layer rather than part of the database library.
+Command parsing and typed query construction, execution orchestration, and terminal
+rendering live in separate `src/cli` components; `src/main.cpp` only handles process
+arguments, top-level errors, and exit status.
+
 The current 22 logical columns are provider event ID, match ID, period, timestamp,
 minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
 normalized start x/y, normalized end x/y, provider, source start x/y, and source end x/y.
+
+Every normalized event passes the same provider-neutral validation before it leaves an
+adapter, enters a `FootballEventTable`, or is accepted from a persisted `.ember` file.
+Required text must not be blank; match and present provider IDs must be positive; period
+and match time values must be valid; canonical coordinates must be within the normalized
+pitch; and source coordinates must be finite. Adapters additionally enforce their own
+source-schema and coordinate-system rules.
 
 ## Canonical identity catalogs
 
@@ -151,6 +163,19 @@ cmake --build build
 ```
 
 For a release build, configure a separate directory with `-DCMAKE_BUILD_TYPE=Release`.
+
+AddressSanitizer and UndefinedBehaviorSanitizer can be enabled with Clang or GCC:
+
+```bash
+cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug \
+  -DEMBERDB_ENABLE_SANITIZERS=ON
+cmake --build build-sanitized
+ctest --test-dir build-sanitized --output-on-failure
+```
+
+GitHub Actions configures clean Debug and Release builds on Linux and macOS and runs the
+complete CTest suite for each. A separate Linux job runs the same suite with both
+sanitizers enabled.
 
 ## Tests
 
@@ -468,6 +493,10 @@ was produced. Missing source locations produce missing normalized and source col
 Non-finite or out-of-bounds provider coordinates fail ingestion rather than being
 clamped or silently discarded, except for the documented Metrica off-pitch location
 case above.
+
+The import summary counts an event as having player data when either a provider player
+ID or a player name is present. This includes Metrica events, whose anonymized player
+labels are names without stable numeric IDs.
 
 Pass and carry end locations are supported. Outcomes are extracted from common StatsBomb detail objects (`pass`, `shot`, `duel`, `dribble`, and `goalkeeper`) when present.
 
