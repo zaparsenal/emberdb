@@ -1,0 +1,52 @@
+{
+  "format": "emberdb-match-review",
+  "version": 1,
+  "catalog": {
+    "teams": [
+      {"id": 1, "name": "Arsenal"},
+      {"id": 2, "name": "Leicester City"}
+    ],
+    "players": [],
+    "matches": [
+      {
+        "id": 100,
+        "competition": "Premier League",
+        "season": "2017/2018",
+        "kickoff_seconds": 1502477100,
+        "home_team_id": 1,
+        "away_team_id": 2,
+        "home_score": 4,
+        "away_score": 3
+      }
+    ],
+    "team_mappings": [
+      {
+        "provider": "StatsBomb",
+        "id": "10",
+        "match_id": null,
+        "canonical_id": 1
+      },
+      {
+        "provider": "StatsBomb",
+        "id": "20",
+        "match_id": null,
+        "canonical_id": 2
+      },
+      {
+        "provider": "Wyscout",
+        "id": "1609",
+        "match_id": null,
+        "canonical_id": 1
+      },
+      {
+        "provider": "Wyscout",
+        "id": "1631",
+        "match_id": null,
+        "canonical_id": 2
+      }
+    ],
+    "player_mappings": [],
+    "match_mappings": []
+  },
+  "candidates": []
+}
