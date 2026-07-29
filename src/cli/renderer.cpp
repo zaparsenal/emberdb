@@ -124,9 +124,9 @@ void printUsage(std::ostream& output) {
             "[--status unresolved|accepted|rejected]\n"
             "       emberdb_cli reconcile inspect --review PATH --candidate-id ID\n"
             "       emberdb_cli reconcile accept --review PATH --candidate-id ID "
-            "--canonical-match-id ID\n"
+            "--canonical-match-id ID --actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli reconcile reject --review PATH --candidate-id ID "
-            "--reason TEXT\n";
+            "--actor TEXT --source TEXT --reason TEXT\n";
 }
 
 void printImportResult(std::ostream& output, const FootballEventTable& table,
@@ -225,6 +225,16 @@ void printCandidateInspection(std::ostream& output,
   }
   if (candidate.rejection_reason) {
     output << "Rejection reason: " << *candidate.rejection_reason << '\n';
+  }
+  if (candidate.decision_provenance) {
+    output << "Decision actor: " << candidate.decision_provenance->actor << '\n'
+           << "Decision source: " << candidate.decision_provenance->source
+           << '\n'
+           << "Decision reason: " << candidate.decision_provenance->reason
+           << '\n'
+           << "Decision recorded at: "
+           << candidate.decision_provenance->recorded_at.time_since_epoch().count()
+           << '\n';
   }
   output << "field\tstatus\tleft_value\tright_value\tcanonical_value\n";
   const auto& result = candidate.reconciliation;

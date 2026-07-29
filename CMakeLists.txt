@@ -329,6 +329,8 @@ if(BUILD_TESTING)
     COMMAND emberdb_cli reconcile reject
       --review ${EMBERDB_CLI_REJECT_REVIEW}
       --candidate-id 1
+      --actor "CTest reviewer"
+      --source "offline fixtures"
       --reason "Provider correction"
   )
   set_tests_properties(EmberDbCliReconciliationTest.RejectsCandidate PROPERTIES
@@ -380,6 +382,9 @@ if(BUILD_TESTING)
       --review ${EMBERDB_CLI_ACCEPT_REVIEW}
       --candidate-id 1
       --canonical-match-id 100
+      --actor "CTest reviewer"
+      --source "offline fixtures"
+      --reason "Fixture metadata agrees"
   )
   set_tests_properties(EmberDbCliReconciliationTest.AcceptsCandidate PROPERTIES
     DEPENDS EmberDbCliReconciliationTest.GeneratesAcceptedCandidate

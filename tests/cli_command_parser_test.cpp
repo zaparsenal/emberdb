@@ -72,6 +72,10 @@ TEST(CliCommandParserTest, ParsesReconciliationDecisionOptions) {
       std::string_view{"review.json"},
       std::string_view{"--candidate-id"},
       std::string_view{"7"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer@example.com"},
+      std::string_view{"--source"},
+      std::string_view{"provider match pages"},
       std::string_view{"--reason"},
       std::string_view{"Wrong fixture"}};
 
@@ -80,6 +84,8 @@ TEST(CliCommandParserTest, ParsesReconciliationDecisionOptions) {
   EXPECT_EQ(options.command, emberdb::cli::Command::ReconcileReject);
   EXPECT_EQ(options.review, "review.json");
   EXPECT_EQ(options.candidate_id, 7U);
+  EXPECT_EQ(options.actor, "reviewer@example.com");
+  EXPECT_EQ(options.source, "provider match pages");
   EXPECT_EQ(options.reason, "Wrong fixture");
 }
 

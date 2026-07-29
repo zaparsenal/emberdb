@@ -48,6 +48,8 @@ struct Options {
   Identifier canonical_match_id{};
   bool has_canonical_match_id{};
   std::optional<MatchCandidateStatus> candidate_status;
+  std::string actor;
+  std::string source;
   std::string reason;
 };
 

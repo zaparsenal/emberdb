@@ -23,6 +23,69 @@ bool blank(std::string_view value) {
   });
 }
 
+void validateProvenance(const ReviewProvenance& provenance) {
+  if (provenance.actor.empty() || blank(provenance.actor)) {
+    throw std::invalid_argument("review actor must not be blank");
+  }
+  if (provenance.source.empty() || blank(provenance.source)) {
+    throw std::invalid_argument("review source must not be blank");
+  }
+  if (provenance.reason.empty() || blank(provenance.reason)) {
+    throw std::invalid_argument("review reason must not be blank");
+  }
+}
+
+void requireRevisionAvailable(std::uint64_t revision) {
+  if (revision == std::numeric_limits<std::uint64_t>::max()) {
+    throw std::overflow_error("match review revision space is exhausted");
+  }
+}
+
+bool canonicalEntityExists(const CanonicalIdentityCatalog& catalog,
+                           CatalogEntityType entity_type,
+                           Identifier canonical_id) {
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      return catalog.competition({canonical_id}) != nullptr;
+    case CatalogEntityType::Season:
+      return catalog.season({canonical_id}) != nullptr;
+    case CatalogEntityType::Team:
+      return catalog.team({canonical_id}) != nullptr;
+    case CatalogEntityType::Player:
+      return catalog.player({canonical_id}) != nullptr;
+    case CatalogEntityType::Match:
+      return catalog.match({canonical_id}) != nullptr;
+  }
+  return false;
+}
+
+bool catalogMappingMatches(const CanonicalIdentityCatalog& catalog,
+                           const CatalogChangeRecord& change) {
+  if (!change.provider || !change.provider_id) {
+    return false;
+  }
+  switch (change.entity_type) {
+    case CatalogEntityType::Competition:
+      return catalog.resolveCompetition(
+                 {*change.provider, *change.provider_id}) ==
+             CanonicalCompetitionId{change.canonical_id};
+    case CatalogEntityType::Season:
+      return catalog.resolveSeason({*change.provider, *change.provider_id}) ==
+             CanonicalSeasonId{change.canonical_id};
+    case CatalogEntityType::Team:
+      return catalog.resolveTeam({*change.provider, *change.provider_id,
+                                  change.provider_match_id}) ==
+             CanonicalTeamId{change.canonical_id};
+    case CatalogEntityType::Player:
+      return catalog.resolvePlayer({*change.provider, *change.provider_id,
+                                    change.provider_match_id}) ==
+             CanonicalPlayerId{change.canonical_id};
+    case CatalogEntityType::Match:
+      return false;
+  }
+  return false;
+}
+
 void requireCompatibleMapping(const CanonicalIdentityCatalog& catalog,
                               const ProviderMatchReference& provider_match,
                               CanonicalMatchId canonical_match) {
@@ -42,8 +105,10 @@ MatchReviewStore::MatchReviewStore(CanonicalIdentityCatalog catalog)
 
 MatchReviewStore MatchReviewStore::restore(
     CanonicalIdentityCatalog catalog,
-    std::vector<MatchCandidateRecord> candidates) {
+    std::vector<MatchCandidateRecord> candidates, std::uint64_t revision,
+    std::vector<CatalogChangeRecord> catalog_changes) {
   MatchReviewStore store(std::move(catalog));
+  store.revision_ = revision;
   for (const auto& record : candidates) {
     if (record.id == 0 || !record.reconciliation.is_candidate) {
       throw std::invalid_argument("persisted match candidate is invalid");
@@ -67,7 +132,8 @@ MatchReviewStore MatchReviewStore::restore(
     }
     switch (record.status) {
       case MatchCandidateStatus::Unresolved:
-        if (record.accepted_match_id || record.rejection_reason) {
+        if (record.accepted_match_id || record.rejection_reason ||
+            record.decision_provenance) {
           throw std::invalid_argument(
               "unresolved candidate contains finalized decision data");
         }
@@ -90,6 +156,9 @@ MatchReviewStore MatchReviewStore::restore(
         }
         break;
     }
+    if (record.decision_provenance) {
+      validateProvenance(*record.decision_provenance);
+    }
     if (record.id >= std::numeric_limits<std::uint64_t>::max() - 1U) {
       throw std::invalid_argument("persisted match candidate ID is too large");
     }
@@ -97,19 +166,198 @@ MatchReviewStore MatchReviewStore::restore(
     store.candidates_.push_back(record);
   }
   std::ranges::sort(store.candidates_, {}, &MatchCandidateRecord::id);
+  std::uint64_t previous_revision{};
+  for (const auto& change : catalog_changes) {
+    if (change.revision == 0 || change.revision > store.revision_ ||
+        change.revision <= previous_revision || change.canonical_id <= 0 ||
+        change.canonical_name.empty() || blank(change.canonical_name)) {
+      throw std::invalid_argument(
+          "persisted catalog change contains invalid revision or identity data");
+    }
+    validateProvenance(change.provenance);
+    if (!canonicalEntityExists(store.catalog_, change.entity_type,
+                               change.canonical_id)) {
+      throw std::invalid_argument(
+          "persisted catalog change references an unknown canonical entity");
+    }
+    if (change.action == CatalogChangeAction::Add) {
+      if (change.provider || change.provider_id || change.provider_match_id) {
+        throw std::invalid_argument(
+            "persisted catalog addition contains provider mapping data");
+      }
+    } else {
+      if (!change.provider || !change.provider_id ||
+          change.provider->empty() || change.provider_id->empty() ||
+          !catalogMappingMatches(store.catalog_, change)) {
+        throw std::invalid_argument(
+            "persisted catalog mapping does not match the durable catalog");
+      }
+      if ((change.entity_type == CatalogEntityType::Competition ||
+           change.entity_type == CatalogEntityType::Season) &&
+          change.provider_match_id) {
+        throw std::invalid_argument(
+            "persisted competition or season mapping has a match scope");
+      }
+    }
+    previous_revision = change.revision;
+    store.catalog_changes_.push_back(change);
+  }
   return store;
 }
 
-CanonicalIdentityCatalog& MatchReviewStore::catalog() noexcept { return catalog_; }
-
 const CanonicalIdentityCatalog& MatchReviewStore::catalog() const noexcept {
   return catalog_;
+}
+
+std::uint64_t MatchReviewStore::revision() const noexcept { return revision_; }
+
+const std::vector<CatalogChangeRecord>& MatchReviewStore::catalogChanges()
+    const noexcept {
+  return catalog_changes_;
+}
+
+void MatchReviewStore::addCompetition(CanonicalCompetition competition,
+                                      ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto id = competition.id.value;
+  const auto name = competition.name;
+  catalog_.addCompetition(std::move(competition));
+  recordCatalogChange(CatalogChangeAction::Add,
+                      CatalogEntityType::Competition, id, name, std::nullopt,
+                      std::nullopt, std::nullopt, std::move(provenance));
+}
+
+void MatchReviewStore::addSeason(CanonicalSeason season,
+                                 ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto id = season.id.value;
+  const auto name = season.name;
+  catalog_.addSeason(std::move(season));
+  recordCatalogChange(CatalogChangeAction::Add, CatalogEntityType::Season, id,
+                      name, std::nullopt, std::nullopt, std::nullopt,
+                      std::move(provenance));
+}
+
+void MatchReviewStore::addTeam(CanonicalTeam team,
+                               ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto id = team.id.value;
+  const auto name = team.name;
+  catalog_.addTeam(std::move(team));
+  recordCatalogChange(CatalogChangeAction::Add, CatalogEntityType::Team, id,
+                      name, std::nullopt, std::nullopt, std::nullopt,
+                      std::move(provenance));
+}
+
+void MatchReviewStore::addPlayer(CanonicalPlayer player,
+                                 ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto id = player.id.value;
+  const auto name = player.name;
+  catalog_.addPlayer(std::move(player));
+  recordCatalogChange(CatalogChangeAction::Add, CatalogEntityType::Player, id,
+                      name, std::nullopt, std::nullopt, std::nullopt,
+                      std::move(provenance));
+}
+
+void MatchReviewStore::addMatch(CanonicalMatch match,
+                                ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto id = match.id.value;
+  const auto name = match.competition + " " + match.season;
+  catalog_.addMatch(std::move(match));
+  recordCatalogChange(CatalogChangeAction::Add, CatalogEntityType::Match, id,
+                      name, std::nullopt, std::nullopt, std::nullopt,
+                      std::move(provenance));
+}
+
+void MatchReviewStore::mapCompetition(
+    ProviderCompetitionReference provider_competition,
+    CanonicalCompetitionId canonical_competition,
+    ReviewProvenance provenance) {
+  if (catalog_.resolveCompetition(provider_competition) ==
+      canonical_competition) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto provider = provider_competition.provider;
+  const auto provider_id = provider_competition.id;
+  catalog_.mapCompetition(std::move(provider_competition),
+                          canonical_competition);
+  recordCatalogChange(
+      CatalogChangeAction::Map, CatalogEntityType::Competition,
+      canonical_competition.value,
+      catalog_.competition(canonical_competition)->name, std::move(provider),
+      std::move(provider_id), std::nullopt, std::move(provenance));
+}
+
+void MatchReviewStore::mapSeason(ProviderSeasonReference provider_season,
+                                 CanonicalSeasonId canonical_season,
+                                 ReviewProvenance provenance) {
+  if (catalog_.resolveSeason(provider_season) == canonical_season) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto provider = provider_season.provider;
+  const auto provider_id = provider_season.id;
+  catalog_.mapSeason(std::move(provider_season), canonical_season);
+  recordCatalogChange(
+      CatalogChangeAction::Map, CatalogEntityType::Season,
+      canonical_season.value, catalog_.season(canonical_season)->name,
+      std::move(provider), std::move(provider_id), std::nullopt,
+      std::move(provenance));
+}
+
+void MatchReviewStore::mapTeam(ProviderTeamReference provider_team,
+                               CanonicalTeamId canonical_team,
+                               ReviewProvenance provenance) {
+  if (catalog_.resolveTeam(provider_team) == canonical_team) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto provider = provider_team.provider;
+  const auto provider_id = provider_team.id;
+  const auto provider_match_id = provider_team.match_id;
+  catalog_.mapTeam(std::move(provider_team), canonical_team);
+  recordCatalogChange(
+      CatalogChangeAction::Map, CatalogEntityType::Team,
+      canonical_team.value, catalog_.team(canonical_team)->name,
+      std::move(provider), std::move(provider_id),
+      std::move(provider_match_id), std::move(provenance));
+}
+
+void MatchReviewStore::mapPlayer(ProviderPlayerReference provider_player,
+                                 CanonicalPlayerId canonical_player,
+                                 ReviewProvenance provenance) {
+  if (catalog_.resolvePlayer(provider_player) == canonical_player) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto provider = provider_player.provider;
+  const auto provider_id = provider_player.id;
+  const auto provider_match_id = provider_player.match_id;
+  catalog_.mapPlayer(std::move(provider_player), canonical_player);
+  recordCatalogChange(
+      CatalogChangeAction::Map, CatalogEntityType::Player,
+      canonical_player.value, catalog_.player(canonical_player)->name,
+      std::move(provider), std::move(provider_id),
+      std::move(provider_match_id), std::move(provenance));
 }
 
 std::vector<std::uint64_t> MatchReviewStore::addCandidates(
     const std::vector<MatchReconciliation>& candidates) {
   std::vector<std::uint64_t> ids;
   ids.reserve(candidates.size());
+  bool added_candidate = false;
   for (const auto& reconciliation : candidates) {
     if (!reconciliation.is_candidate) {
       throw std::invalid_argument("cannot review a disqualified match comparison");
@@ -125,11 +373,18 @@ std::vector<std::uint64_t> MatchReviewStore::addCandidates(
     if (next_candidate_id_ == std::numeric_limits<std::uint64_t>::max()) {
       throw std::overflow_error("match candidate ID space is exhausted");
     }
+    if (!added_candidate) {
+      requireRevisionAvailable(revision_);
+    }
     const auto id = next_candidate_id_++;
     candidates_.push_back(
         {id, reconciliation, MatchCandidateStatus::Unresolved, std::nullopt,
-         std::nullopt});
+         std::nullopt, std::nullopt});
+    added_candidate = true;
     ids.push_back(id);
+  }
+  if (added_candidate) {
+    advanceRevision();
   }
   return ids;
 }
@@ -152,7 +407,8 @@ std::vector<const MatchCandidateRecord*> MatchReviewStore::candidates(
 }
 
 void MatchReviewStore::accept(std::uint64_t candidate_id,
-                              CanonicalMatchId canonical_match_id) {
+                              CanonicalMatchId canonical_match_id,
+                              ReviewProvenance provenance) {
   auto& record = requireCandidate(candidate_id);
   if (record.status == MatchCandidateStatus::Accepted) {
     if (record.accepted_match_id == canonical_match_id) {
@@ -174,16 +430,20 @@ void MatchReviewStore::accept(std::uint64_t candidate_id,
                            canonical_match_id);
   requireCompatibleMapping(catalog_, record.reconciliation.right_match,
                            canonical_match_id);
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
   catalog_.mapMatch(record.reconciliation.left_match, canonical_match_id);
   catalog_.mapMatch(record.reconciliation.right_match, canonical_match_id);
   record.status = MatchCandidateStatus::Accepted;
   record.accepted_match_id = canonical_match_id;
+  record.decision_provenance = std::move(provenance);
+  advanceRevision();
 }
 
-void MatchReviewStore::reject(std::uint64_t candidate_id, std::string reason) {
-  if (reason.empty() || blank(reason)) {
-    throw std::invalid_argument("candidate rejection reason must not be blank");
-  }
+void MatchReviewStore::reject(std::uint64_t candidate_id,
+                              ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  const auto& reason = provenance.reason;
   auto& record = requireCandidate(candidate_id);
   if (record.status == MatchCandidateStatus::Rejected) {
     if (record.rejection_reason == reason) {
@@ -196,8 +456,29 @@ void MatchReviewStore::reject(std::uint64_t candidate_id, std::string reason) {
     throw std::invalid_argument("candidate " + std::to_string(candidate_id) +
                                 " is already accepted");
   }
+  requireRevisionAvailable(revision_);
   record.status = MatchCandidateStatus::Rejected;
-  record.rejection_reason = std::move(reason);
+  record.rejection_reason = reason;
+  record.decision_provenance = std::move(provenance);
+  advanceRevision();
+}
+
+void MatchReviewStore::recordCatalogChange(
+    CatalogChangeAction action, CatalogEntityType entity_type,
+    Identifier canonical_id, std::string canonical_name,
+    std::optional<std::string> provider, std::optional<std::string> provider_id,
+    std::optional<std::string> provider_match_id,
+    ReviewProvenance provenance) {
+  advanceRevision();
+  catalog_changes_.push_back(
+      {revision_, action, entity_type, canonical_id, std::move(canonical_name),
+       std::move(provider), std::move(provider_id),
+       std::move(provider_match_id), std::move(provenance)});
+}
+
+void MatchReviewStore::advanceRevision() {
+  requireRevisionAvailable(revision_);
+  ++revision_;
 }
 
 MatchCandidateRecord& MatchReviewStore::requireCandidate(std::uint64_t id) {
@@ -217,6 +498,33 @@ std::string_view matchCandidateStatusName(MatchCandidateStatus status) noexcept 
       return "accepted";
     case MatchCandidateStatus::Rejected:
       return "rejected";
+  }
+  return "unknown";
+}
+
+std::string_view catalogChangeActionName(CatalogChangeAction action) noexcept {
+  switch (action) {
+    case CatalogChangeAction::Add:
+      return "add";
+    case CatalogChangeAction::Map:
+      return "map";
+  }
+  return "unknown";
+}
+
+std::string_view catalogEntityTypeName(
+    CatalogEntityType entity_type) noexcept {
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      return "competition";
+    case CatalogEntityType::Season:
+      return "season";
+    case CatalogEntityType::Team:
+      return "team";
+    case CatalogEntityType::Player:
+      return "player";
+    case CatalogEntityType::Match:
+      return "match";
   }
   return "unknown";
 }

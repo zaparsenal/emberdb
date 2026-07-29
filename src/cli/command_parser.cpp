@@ -243,6 +243,10 @@ Options parseOptions(std::span<const std::string_view> arguments) {
         throw std::runtime_error(
             "--status must be unresolved, accepted, or rejected");
       }
+    } else if (option == "--actor") {
+      options.actor = value;
+    } else if (option == "--source") {
+      options.source = value;
     } else if (option == "--reason") {
       options.reason = value;
     } else {
@@ -297,11 +301,17 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       throw std::runtime_error(
           "--canonical-match-id is only valid for reconcile accept");
     }
-    if (options.command == Command::ReconcileReject && options.reason.empty()) {
-      throw std::runtime_error("--reason is required for reconcile reject");
-    } else if (options.command != Command::ReconcileReject &&
-               !options.reason.empty()) {
-      throw std::runtime_error("--reason is only valid for reconcile reject");
+    const bool is_decision = options.command == Command::ReconcileAccept ||
+                             options.command == Command::ReconcileReject;
+    if (is_decision && (options.actor.empty() || options.source.empty() ||
+                        options.reason.empty())) {
+      throw std::runtime_error(
+          "--actor, --source, and --reason are required for reconcile decisions");
+    } else if (!is_decision &&
+               (!options.actor.empty() || !options.source.empty() ||
+                !options.reason.empty())) {
+      throw std::runtime_error(
+          "--actor, --source, and --reason are only valid for reconcile decisions");
     }
     if (options.command != Command::ReconcileList &&
         options.candidate_status) {
@@ -314,6 +324,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       !options.left_input.empty() || !options.right_provider.empty() ||
       !options.right_input.empty() || options.has_candidate_id ||
       options.has_canonical_match_id || options.candidate_status ||
+      !options.actor.empty() || !options.source.empty() ||
       !options.reason.empty()) {
     throw std::runtime_error(
         "reconciliation options are only valid for reconcile commands");

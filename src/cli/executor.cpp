@@ -1,5 +1,6 @@
 #include "cli/executor.h"
 
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -61,6 +62,7 @@ FootballEventTable importTable(const Options& options) {
 
 void runReconciliationCommand(const Options& options, std::ostream& output) {
   auto store = loadMatchReviewStore(options.review);
+  const auto loaded_revision = store.revision();
   if (options.command == Command::ReconcileGenerate) {
     const auto left =
         loadProviderMatches(options.left_provider, options.left_input);
@@ -70,7 +72,9 @@ void runReconciliationCommand(const Options& options, std::ostream& output) {
     const auto existing_count = store.candidates().size();
     const auto ids = store.addCandidates(generated);
     const auto added_count = store.candidates().size() - existing_count;
-    saveMatchReviewStore(store, options.review);
+    if (added_count != 0) {
+      saveMatchReviewStore(store, options.review, loaded_revision);
+    }
     printCandidateGeneration(output, generated.size(), added_count, ids);
     return;
   }
@@ -89,14 +93,23 @@ void runReconciliationCommand(const Options& options, std::ostream& output) {
     return;
   }
   if (options.command == Command::ReconcileAccept) {
-    store.accept(options.candidate_id, {options.canonical_match_id});
-    saveMatchReviewStore(store, options.review);
+    const ReviewProvenance provenance{
+        options.actor, options.source, options.reason,
+        std::chrono::time_point_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now())};
+    store.accept(options.candidate_id, {options.canonical_match_id},
+                 provenance);
+    saveMatchReviewStore(store, options.review, loaded_revision);
     printCandidateAccepted(output, options.candidate_id,
                            options.canonical_match_id);
     return;
   }
-  store.reject(options.candidate_id, options.reason);
-  saveMatchReviewStore(store, options.review);
+  const ReviewProvenance provenance{
+      options.actor, options.source, options.reason,
+      std::chrono::time_point_cast<std::chrono::seconds>(
+          std::chrono::system_clock::now())};
+  store.reject(options.candidate_id, provenance);
+  saveMatchReviewStore(store, options.review, loaded_revision);
   printCandidateRejected(output, options.candidate_id, options.reason);
 }
 
