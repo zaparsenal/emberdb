@@ -12,6 +12,10 @@ Provider metadata follows a separate path:
 
 `provider metadata -> metadata adapter -> explicit canonical identity mappings -> canonical event identity`
 
+Batch catalog authoring follows:
+
+`versioned canonical manifest -> complete validation/plan -> audited catalog APIs -> atomic review-store replacement`
+
 ## Architectural boundaries
 
 - Provider-specific parsing belongs under `ingestion`; storage and future query code must never depend on raw StatsBomb JSON.
@@ -21,12 +25,21 @@ Provider metadata follows a separate path:
 - Canonical competition, season, team, and player lifecycle changes are non-destructive:
   deprecated and merged records remain durable, and every rename, deprecation, or merge
   must pass through the audited review-store path.
+- Canonical manifests belong under `identity`, never `ingestion`. They must use
+  deterministic typed IDs, require author/source/reason provenance for every addition
+  and mapping, validate the complete batch before mutation, and apply only through
+  `MatchReviewStore` catalog APIs.
+- Manifest dry runs are deterministic and non-mutating. A rejected plan must retain the
+  exact loaded store, and a successful write must use revision checking plus atomic
+  sibling-file replacement.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
 - Route normalized events through `validateFootballEvent`; adapters should add provider
   record context to validation failures rather than duplicating provider-neutral rules.
 - Normalized coordinates use EmberDB's 0–100 by 0–100 pitch with attacks running left to right. Preserve provider coordinates in the `source_*` columns and validate bounds in each adapter.
 - Keep components small and owned through values or RAII. Avoid global mutable state.
-- Do not add SQL, persistence, compression, multithreading, SIMD, memory mapping, new providers, web services, or cloud infrastructure until a milestone requires them.
+- Do not add SQL, new persistence formats, compression, multithreading, SIMD, memory
+  mapping, new providers, web services, or cloud infrastructure until a milestone
+  requires them.
 - Add an abstraction only when it serves current behavior or an imminent extension point.
 
 ## Repository layout
@@ -139,6 +152,24 @@ Initialize and explicitly author a canonical identity review store with:
   --actor "reviewer@example.com" --source "catalog review" \
   --reason "Retire inactive identity"
 ```
+
+Review and atomically apply a canonical identity manifest with:
+
+```bash
+./build/emberdb_cli catalog import \
+  --manifest examples/catalog-manifest.json \
+  --store identities.ember-catalog \
+  --dry-run
+./build/emberdb_cli catalog import \
+  --manifest examples/catalog-manifest.json \
+  --store identities.ember-catalog
+```
+
+Manifest v1 supports competitions, seasons, teams, players, matches, and their provider
+mappings. Seasons reference competitions by typed ID; matches reference a season and
+both teams by typed ID. Player-team membership is not part of the current canonical
+model and must not be invented by the importer. Unknown fields and unsupported
+relationships are rejected.
 
 Generate and review provider-to-canonical entity candidates:
 
