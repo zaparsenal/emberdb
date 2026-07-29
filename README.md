@@ -84,6 +84,13 @@ The current 22 logical columns are provider event ID, match ID, period, timestam
 minute, second, possession ID, team ID/name, player ID/name, event type, outcome,
 normalized start x/y, normalized end x/y, provider, source start x/y, and source end x/y.
 
+Every normalized event passes the same provider-neutral validation before it leaves an
+adapter, enters a `FootballEventTable`, or is accepted from a persisted `.ember` file.
+Required text must not be blank; match and present provider IDs must be positive; period
+and match time values must be valid; canonical coordinates must be within the normalized
+pitch; and source coordinates must be finite. Adapters additionally enforce their own
+source-schema and coordinate-system rules.
+
 ## Canonical identity catalogs
 
 `CanonicalIdentityCatalog` stores typed canonical match, team, and player records
@@ -468,6 +475,10 @@ was produced. Missing source locations produce missing normalized and source col
 Non-finite or out-of-bounds provider coordinates fail ingestion rather than being
 clamped or silently discarded, except for the documented Metrica off-pitch location
 case above.
+
+The import summary counts an event as having player data when either a provider player
+ID or a player name is present. This includes Metrica events, whose anonymized player
+labels are names without stable numeric IDs.
 
 Pass and carry end locations are supported. Outcomes are extracted from common StatsBomb detail objects (`pass`, `shot`, `duel`, `dribble`, and `goalkeeper`) when present.
 

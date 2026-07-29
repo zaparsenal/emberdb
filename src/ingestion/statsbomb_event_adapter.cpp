@@ -156,10 +156,6 @@ FootballEvent normalize(const Json& event, const ImportContext& context, std::si
   normalized.time = MatchTime{parseTimestamp(timestamp_text, index),
                               required<std::int32_t>(event, "minute", index),
                               required<std::int32_t>(event, "second", index)};
-  if (normalized.period <= 0 || normalized.time.minute < 0 || normalized.time.second < 0 ||
-      normalized.time.second >= 60) {
-    throw eventError(index, "period, minute, or second is outside its valid range");
-  }
   normalized.possession_id = optionalScalar<Identifier>(event, "possession", index);
   normalized.team_id = optionalNested<Identifier>(event, "team", "id", index);
   normalized.team_name = optionalNested<std::string>(event, "team", "name", index);
@@ -175,6 +171,11 @@ FootballEvent normalize(const Json& event, const ImportContext& context, std::si
   normalized.end_location = normalizeStatsBombCoordinate(
       normalized.source_end_location, "end_location", index);
   normalized.provider = "StatsBomb";
+  try {
+    validateFootballEvent(normalized);
+  } catch (const std::invalid_argument& error) {
+    throw eventError(index, error.what());
+  }
   return normalized;
 }
 

@@ -91,6 +91,23 @@ TEST(StatsBombEventAdapterTest, RejectsCoordinatesOutsideStatsBombPitchBounds) {
       std::runtime_error);
 }
 
+TEST(StatsBombEventAdapterTest, ReportsCentralValidationErrorsWithEventContext) {
+  const emberdb::StatsBombEventAdapter adapter;
+  EXPECT_THROW(
+      {
+        try {
+          static_cast<void>(
+              adapter.loadEvents(fixture("invalid_event_semantics.json"), {1}));
+        } catch (const std::runtime_error& error) {
+          const std::string message(error.what());
+          EXPECT_NE(message.find("index 0"), std::string::npos);
+          EXPECT_NE(message.find("provider_event_id"), std::string::npos);
+          throw;
+        }
+      },
+      std::runtime_error);
+}
+
 TEST(StatsBombEventAdapterTest, RejectsInvalidJsonWithFileContext) {
   const emberdb::StatsBombEventAdapter adapter;
   EXPECT_THROW(

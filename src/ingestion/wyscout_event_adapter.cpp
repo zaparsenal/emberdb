@@ -136,18 +136,20 @@ FootballEvent normalize(const Json& source, const ImportContext& context,
   event.team_id = required<Identifier>(source, "teamId", index);
   const auto player_id = required<Identifier>(source, "playerId", index);
   if (player_id != 0) {
-    event.player_id = player_id;
+  event.player_id = player_id;
   }
   event.event_type = required<std::string>(source, "eventName", index);
-  if (event.event_type.empty()) {
-    throw eventError(index, "eventName must not be empty");
-  }
   event.outcome = outcome(source, index);
   event.source_start_location = position(*positions, 0, index);
   event.source_end_location = position(*positions, 1, index);
   event.start_location = event.source_start_location;
   event.end_location = event.source_end_location;
   event.provider = "Wyscout";
+  try {
+    validateFootballEvent(event);
+  } catch (const std::invalid_argument& error) {
+    throw eventError(index, error.what());
+  }
   return event;
 }
 

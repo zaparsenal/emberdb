@@ -1,28 +1,12 @@
 #include "emberdb/storage/football_event_table.h"
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
-
-#include "emberdb/common/coordinate_normalization.h"
 
 namespace emberdb {
 
 void FootballEventTable::append(const FootballEvent& event) {
-  if (event.start_location) {
-    validateCanonicalCoordinate(*event.start_location);
-  }
-  if (event.end_location) {
-    validateCanonicalCoordinate(*event.end_location);
-  }
-  const auto validate_source = [](const std::optional<Coordinate>& coordinate) {
-    if (coordinate &&
-        (!std::isfinite(coordinate->x) || !std::isfinite(coordinate->y))) {
-      throw std::invalid_argument("Source coordinate values must be finite");
-    }
-  };
-  validate_source(event.source_start_location);
-  validate_source(event.source_end_location);
+  validateFootballEvent(event);
   provider_event_ids_.push_back(event.provider_event_id);
   match_ids_.push_back(event.match_id);
   periods_.push_back(event.period);
@@ -171,8 +155,13 @@ FootballEventCell FootballEventTable::cell(FootballEventColumn column,
 }
 
 std::size_t FootballEventTable::playerDataCount() const noexcept {
-  return static_cast<std::size_t>(std::count_if(
-      player_ids_.begin(), player_ids_.end(), [](const auto& value) { return value.has_value(); }));
+  std::size_t count{};
+  for (std::size_t row = 0; row < rowCount(); ++row) {
+    if (player_ids_[row] || player_names_[row]) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 std::size_t FootballEventTable::startLocationCount() const noexcept {

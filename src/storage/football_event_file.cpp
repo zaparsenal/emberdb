@@ -677,7 +677,7 @@ FootballEventTable loadFootballEventTable(const std::filesystem::path& path) {
           source_end_x ? std::optional<Coordinate>{{*source_end_x, *source_end_y}}
                        : std::nullopt});
     } catch (const std::invalid_argument& error) {
-      invalidFile(path, "invalid coordinate at row " + std::to_string(row) + ": " +
+      invalidFile(path, "invalid event at row " + std::to_string(row) + ": " +
                             error.what());
     }
   }

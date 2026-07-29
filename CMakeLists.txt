@@ -19,6 +19,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(emberdb
   src/common/coordinate_normalization.cpp
+  src/common/football_event.cpp
   src/common/football_event_column.cpp
   src/identity/canonical_identity.cpp
   src/ingestion/metrica_event_adapter.cpp
@@ -70,6 +71,7 @@ if(BUILD_TESTING)
     tests/aggregation_query_test.cpp
     tests/canonical_identity_test.cpp
     tests/coordinate_normalization_test.cpp
+    tests/football_event_validation_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
     tests/match_review_file_test.cpp
@@ -130,6 +132,18 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.ImportsAndQueriesMetricaFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Metrica"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.CountsMetricaPlayerNames
+    COMMAND emberdb_cli import
+      --provider metrica
+      --match-id 42
+      --home-first-half-direction left-to-right
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/metrica_events.csv
+  )
+  set_tests_properties(EmberDbCliTest.CountsMetricaPlayerNames PROPERTIES
+    PASS_REGULAR_EXPRESSION "Events with player data: 3"
   )
 
   add_test(
