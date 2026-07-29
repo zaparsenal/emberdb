@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -12,12 +13,35 @@ namespace emberdb {
 
 enum class MatchCandidateStatus { Unresolved, Accepted, Rejected };
 
+struct ReviewProvenance {
+  std::string actor;
+  std::string source;
+  std::string reason;
+  std::chrono::sys_seconds recorded_at;
+};
+
+enum class CatalogChangeAction { Add, Map };
+enum class CatalogEntityType { Competition, Season, Team, Player, Match };
+
+struct CatalogChangeRecord {
+  std::uint64_t revision{};
+  CatalogChangeAction action{CatalogChangeAction::Add};
+  CatalogEntityType entity_type{CatalogEntityType::Team};
+  Identifier canonical_id{};
+  std::string canonical_name;
+  std::optional<std::string> provider;
+  std::optional<std::string> provider_id;
+  std::optional<std::string> provider_match_id;
+  ReviewProvenance provenance;
+};
+
 struct MatchCandidateRecord {
   std::uint64_t id{};
   MatchReconciliation reconciliation;
   MatchCandidateStatus status{MatchCandidateStatus::Unresolved};
   std::optional<CanonicalMatchId> accepted_match_id;
   std::optional<std::string> rejection_reason;
+  std::optional<ReviewProvenance> decision_provenance;
 };
 
 class MatchReviewStore {
@@ -26,10 +50,32 @@ class MatchReviewStore {
   explicit MatchReviewStore(CanonicalIdentityCatalog catalog);
   [[nodiscard]] static MatchReviewStore restore(
       CanonicalIdentityCatalog catalog,
-      std::vector<MatchCandidateRecord> candidates);
+      std::vector<MatchCandidateRecord> candidates,
+      std::uint64_t revision = 0,
+      std::vector<CatalogChangeRecord> catalog_changes = {});
 
-  [[nodiscard]] CanonicalIdentityCatalog& catalog() noexcept;
   [[nodiscard]] const CanonicalIdentityCatalog& catalog() const noexcept;
+  [[nodiscard]] std::uint64_t revision() const noexcept;
+  [[nodiscard]] const std::vector<CatalogChangeRecord>& catalogChanges()
+      const noexcept;
+
+  void addCompetition(CanonicalCompetition competition,
+                      ReviewProvenance provenance);
+  void addSeason(CanonicalSeason season, ReviewProvenance provenance);
+  void addTeam(CanonicalTeam team, ReviewProvenance provenance);
+  void addPlayer(CanonicalPlayer player, ReviewProvenance provenance);
+  void addMatch(CanonicalMatch match, ReviewProvenance provenance);
+  void mapCompetition(ProviderCompetitionReference provider_competition,
+                      CanonicalCompetitionId canonical_competition,
+                      ReviewProvenance provenance);
+  void mapSeason(ProviderSeasonReference provider_season,
+                 CanonicalSeasonId canonical_season,
+                 ReviewProvenance provenance);
+  void mapTeam(ProviderTeamReference provider_team,
+               CanonicalTeamId canonical_team, ReviewProvenance provenance);
+  void mapPlayer(ProviderPlayerReference provider_player,
+                 CanonicalPlayerId canonical_player,
+                 ReviewProvenance provenance);
 
   [[nodiscard]] std::vector<std::uint64_t> addCandidates(
       const std::vector<MatchReconciliation>& candidates);
@@ -37,18 +83,34 @@ class MatchReviewStore {
   [[nodiscard]] std::vector<const MatchCandidateRecord*> candidates(
       std::optional<MatchCandidateStatus> status = std::nullopt) const;
 
-  void accept(std::uint64_t candidate_id, CanonicalMatchId canonical_match_id);
-  void reject(std::uint64_t candidate_id, std::string reason);
+  void accept(std::uint64_t candidate_id, CanonicalMatchId canonical_match_id,
+              ReviewProvenance provenance);
+  void reject(std::uint64_t candidate_id, ReviewProvenance provenance);
 
  private:
   [[nodiscard]] MatchCandidateRecord& requireCandidate(std::uint64_t id);
+  void recordCatalogChange(CatalogChangeAction action,
+                           CatalogEntityType entity_type,
+                           Identifier canonical_id,
+                           std::string canonical_name,
+                           std::optional<std::string> provider,
+                           std::optional<std::string> provider_id,
+                           std::optional<std::string> provider_match_id,
+                           ReviewProvenance provenance);
+  void advanceRevision();
 
   CanonicalIdentityCatalog catalog_;
   std::vector<MatchCandidateRecord> candidates_;
+  std::vector<CatalogChangeRecord> catalog_changes_;
+  std::uint64_t revision_{};
   std::uint64_t next_candidate_id_{1};
 };
 
 [[nodiscard]] std::string_view matchCandidateStatusName(
     MatchCandidateStatus status) noexcept;
+[[nodiscard]] std::string_view catalogChangeActionName(
+    CatalogChangeAction action) noexcept;
+[[nodiscard]] std::string_view catalogEntityTypeName(
+    CatalogEntityType entity_type) noexcept;
 
 }  // namespace emberdb

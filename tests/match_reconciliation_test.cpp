@@ -79,6 +79,31 @@ TEST(MatchReconciliationTest, ProducesExplainableCrossProviderCandidate) {
   EXPECT_EQ(result.season.status, emberdb::ReconciliationStatus::Missing);
 }
 
+TEST(MatchReconciliationTest,
+     UsesExplicitCompetitionAndSeasonMappingsBeforeNames) {
+  auto identities = catalog();
+  identities.addCompetition({{20}, "Premier League"});
+  identities.addSeason({{30}, {20}, "2017/2018"});
+  identities.mapCompetition({"StatsBomb", "2"}, {20});
+  identities.mapCompetition({"Wyscout", "364"}, {20});
+  identities.mapSeason({"StatsBomb", "44"}, {30});
+  identities.mapSeason({"Wyscout", "181150"}, {30});
+  auto left = statsbombMatch();
+  auto right = wyscoutMatch();
+  left.competition_name = "StatsBomb label";
+  right.competition_name = "Wyscout label";
+  left.season_name = "StatsBomb season";
+  right.season_name = "Wyscout season";
+
+  const auto result = emberdb::reconcileMatches(left, right, identities);
+
+  EXPECT_EQ(result.competition.status,
+            emberdb::ReconciliationStatus::Agreeing);
+  EXPECT_EQ(result.competition.canonical_value, "20");
+  EXPECT_EQ(result.season.status, emberdb::ReconciliationStatus::Agreeing);
+  EXPECT_EQ(result.season.canonical_value, "30");
+}
+
 TEST(MatchReconciliationTest, ReconcilesRecordsProducedByMetadataAdapters) {
   const emberdb::StatsBombMetadataAdapter statsbomb;
   const emberdb::WyscoutMetadataAdapter wyscout;

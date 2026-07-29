@@ -20,6 +20,12 @@ emberdb::CanonicalIdentityCatalog catalogWithMatch() {
 
 TEST(CanonicalIdentityCatalogTest, MapsMultipleProvidersToCanonicalEntities) {
   auto catalog = catalogWithMatch();
+  catalog.addCompetition({{20}, "Premier League"});
+  catalog.addSeason({{30}, {20}, "2017/2018"});
+  catalog.mapCompetition({"StatsBomb", "2"}, {20});
+  catalog.mapCompetition({"Wyscout", "364"}, {20});
+  catalog.mapSeason({"StatsBomb", "44"}, {30});
+  catalog.mapSeason({"Wyscout", "181150"}, {30});
   catalog.mapTeam({"StatsBomb", "10", std::nullopt}, {1});
   catalog.mapTeam({"Wyscout", "1609", std::nullopt}, {1});
   catalog.mapPlayer({"StatsBomb", "99", std::nullopt}, {10});
@@ -27,6 +33,10 @@ TEST(CanonicalIdentityCatalogTest, MapsMultipleProvidersToCanonicalEntities) {
   catalog.mapMatch({"StatsBomb", "12345"}, {100});
   catalog.mapMatch({"Wyscout", "2499719"}, {100});
 
+  EXPECT_EQ(catalog.resolveCompetition({"Wyscout", "364"}),
+            emberdb::CanonicalCompetitionId{20});
+  EXPECT_EQ(catalog.resolveSeason({"Wyscout", "181150"}),
+            emberdb::CanonicalSeasonId{30});
   EXPECT_EQ(catalog.resolveTeam({"StatsBomb", "10", std::nullopt}),
             emberdb::CanonicalTeamId{1});
   EXPECT_EQ(catalog.resolveTeam({"Wyscout", "1609", std::nullopt}),
@@ -35,9 +45,13 @@ TEST(CanonicalIdentityCatalogTest, MapsMultipleProvidersToCanonicalEntities) {
             emberdb::CanonicalPlayerId{10});
   EXPECT_EQ(catalog.resolveMatch({"StatsBomb", "12345"}),
             emberdb::CanonicalMatchId{100});
+  EXPECT_EQ(catalog.competitions().size(), 1U);
+  EXPECT_EQ(catalog.seasons().size(), 1U);
   EXPECT_EQ(catalog.teams().size(), 2U);
   EXPECT_EQ(catalog.players().size(), 1U);
   EXPECT_EQ(catalog.matches().size(), 1U);
+  EXPECT_EQ(catalog.competitionMappings().size(), 2U);
+  EXPECT_EQ(catalog.seasonMappings().size(), 2U);
   EXPECT_EQ(catalog.teamMappings().size(), 2U);
   EXPECT_EQ(catalog.playerMappings().size(), 2U);
   EXPECT_EQ(catalog.matchMappings().size(), 2U);
@@ -88,6 +102,21 @@ TEST(CanonicalIdentityCatalogTest, RejectsConflictingAndDanglingMappings) {
                std::invalid_argument);
   EXPECT_THROW(catalog.mapMatch({"StatsBomb", "12345"}, {999}),
                std::invalid_argument);
+}
+
+TEST(CanonicalIdentityCatalogTest,
+     ValidatesCompetitionAndSeasonRelationshipsAndMappings) {
+  emberdb::CanonicalIdentityCatalog catalog;
+  EXPECT_THROW(catalog.addSeason({{10}, {1}, "2023/2024"}),
+               std::invalid_argument);
+  catalog.addCompetition({{1}, "Premier League"});
+  catalog.addSeason({{10}, {1}, "2023/2024"});
+  EXPECT_THROW(catalog.mapCompetition({"StatsBomb", "2"}, {99}),
+               std::invalid_argument);
+  EXPECT_THROW(catalog.mapSeason({"StatsBomb", "44"}, {99}),
+               std::invalid_argument);
+  catalog.mapCompetition({"StatsBomb", "2"}, {1});
+  catalog.mapSeason({"StatsBomb", "44"}, {10});
 }
 
 TEST(CanonicalIdentityCatalogTest, ValidatesCanonicalMatchRelationships) {

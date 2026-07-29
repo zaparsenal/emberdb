@@ -56,13 +56,25 @@ MatchFieldEvidence evidence(const ProviderMatchMetadata& left,
           right.reference.provider, std::nullopt, std::nullopt, std::nullopt};
 }
 
+template <typename CanonicalId>
 MatchFieldEvidence namedIdentityEvidence(
     const ProviderMatchMetadata& left, const ProviderMatchMetadata& right,
     const std::string& left_id, const std::optional<std::string>& left_name,
-    const std::string& right_id, const std::optional<std::string>& right_name) {
+    const std::string& right_id, const std::optional<std::string>& right_name,
+    std::optional<CanonicalId> left_canonical,
+    std::optional<CanonicalId> right_canonical) {
   auto result = evidence(left, right);
   result.left_value = left_name ? *left_name : left_id;
   result.right_value = right_name ? *right_name : right_id;
+  if (left_canonical && right_canonical) {
+    result.status = *left_canonical == *right_canonical
+                        ? ReconciliationStatus::Agreeing
+                        : ReconciliationStatus::Conflicting;
+    if (result.status == ReconciliationStatus::Agreeing) {
+      result.canonical_value = std::to_string(left_canonical->value);
+    }
+    return result;
+  }
   if (left.reference.provider == right.reference.provider) {
     result.status = left_id == right_id ? ReconciliationStatus::Agreeing
                                         : ReconciliationStatus::Conflicting;
@@ -197,9 +209,16 @@ MatchReconciliation reconcileMatches(
   result.right_match = right.reference;
   result.competition = namedIdentityEvidence(
       left, right, left.competition_id, left.competition_name,
-      right.competition_id, right.competition_name);
-  result.season = namedIdentityEvidence(left, right, left.season_id, left.season_name,
-                                        right.season_id, right.season_name);
+      right.competition_id, right.competition_name,
+      catalog.resolveCompetition(
+          {left.reference.provider, left.competition_id}),
+      catalog.resolveCompetition(
+          {right.reference.provider, right.competition_id}));
+  result.season = namedIdentityEvidence(
+      left, right, left.season_id, left.season_name, right.season_id,
+      right.season_name,
+      catalog.resolveSeason({left.reference.provider, left.season_id}),
+      catalog.resolveSeason({right.reference.provider, right.season_id}));
   result.kickoff = kickoffEvidence(left, right, options);
   result.home_team =
       teamEvidence(left, right, left.home_team, right.home_team, catalog);

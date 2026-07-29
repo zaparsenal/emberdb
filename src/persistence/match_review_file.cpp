@@ -33,6 +33,29 @@ class TemporaryFile {
   bool committed_{};
 };
 
+class ReviewFileLock {
+ public:
+  explicit ReviewFileLock(const std::filesystem::path& review_path) {
+    path_ = review_path;
+    path_ += ".lock";
+    std::error_code error;
+    if (!std::filesystem::create_directory(path_, error)) {
+      const auto detail =
+          error ? error.message() : "another writer holds the review lock";
+      throw std::runtime_error("Unable to lock match review file '" +
+                               review_path.string() + "': " + detail);
+    }
+  }
+
+  ~ReviewFileLock() {
+    std::error_code error;
+    std::filesystem::remove(path_, error);
+  }
+
+ private:
+  std::filesystem::path path_;
+};
+
 [[noreturn]] void invalidFile(const std::filesystem::path& path,
                               const std::string& detail) {
   throw std::runtime_error("Invalid match review file '" + path.string() +
@@ -44,6 +67,15 @@ Json optionalString(const std::optional<std::string>& value) {
 }
 
 Json providerMatchJson(const ProviderMatchReference& reference) {
+  return {{"provider", reference.provider}, {"id", reference.id}};
+}
+
+Json providerCompetitionJson(
+    const ProviderCompetitionReference& reference) {
+  return {{"provider", reference.provider}, {"id", reference.id}};
+}
+
+Json providerSeasonJson(const ProviderSeasonReference& reference) {
   return {{"provider", reference.provider}, {"id", reference.id}};
 }
 
@@ -82,13 +114,35 @@ Json evidenceJson(const MatchFieldEvidence& evidence) {
           {"canonical_value", optionalString(evidence.canonical_value)}};
 }
 
+Json provenanceJson(const ReviewProvenance& provenance) {
+  return {{"actor", provenance.actor},
+          {"source", provenance.source},
+          {"reason", provenance.reason},
+          {"recorded_at_seconds",
+           provenance.recorded_at.time_since_epoch().count()}};
+}
+
 Json catalogJson(const CanonicalIdentityCatalog& catalog) {
-  Json result = {{"teams", Json::array()},
+  Json result = {{"competitions", Json::array()},
+                 {"seasons", Json::array()},
+                 {"teams", Json::array()},
                  {"players", Json::array()},
                  {"matches", Json::array()},
+                 {"competition_mappings", Json::array()},
+                 {"season_mappings", Json::array()},
                  {"team_mappings", Json::array()},
                  {"player_mappings", Json::array()},
                  {"match_mappings", Json::array()}};
+  for (const auto& [id, competition] : catalog.competitions()) {
+    result["competitions"].push_back(
+        {{"id", id.value}, {"name", competition.name}});
+  }
+  for (const auto& [id, season] : catalog.seasons()) {
+    result["seasons"].push_back(
+        {{"id", id.value},
+         {"competition_id", season.competition_id.value},
+         {"name", season.name}});
+  }
   for (const auto& [id, team] : catalog.teams()) {
     result["teams"].push_back({{"id", id.value}, {"name", team.name}});
   }
@@ -107,6 +161,16 @@ Json catalogJson(const CanonicalIdentityCatalog& catalog) {
          {"away_team_id", match.away_team_id.value},
          {"home_score", match.home_score ? Json(*match.home_score) : Json(nullptr)},
          {"away_score", match.away_score ? Json(*match.away_score) : Json(nullptr)}});
+  }
+  for (const auto& [reference, id] : catalog.competitionMappings()) {
+    auto mapping = providerCompetitionJson(reference);
+    mapping["canonical_id"] = id.value;
+    result["competition_mappings"].push_back(std::move(mapping));
+  }
+  for (const auto& [reference, id] : catalog.seasonMappings()) {
+    auto mapping = providerSeasonJson(reference);
+    mapping["canonical_id"] = id.value;
+    result["season_mappings"].push_back(std::move(mapping));
   }
   for (const auto& [reference, id] : catalog.teamMappings()) {
     auto mapping = providerTeamJson(reference);
@@ -134,6 +198,10 @@ Json candidateJson(const MatchCandidateRecord& record) {
            record.accepted_match_id ? Json(record.accepted_match_id->value)
                                     : Json(nullptr)},
           {"rejection_reason", optionalString(record.rejection_reason)},
+          {"decision_provenance",
+           record.decision_provenance
+               ? provenanceJson(*record.decision_provenance)
+               : Json(nullptr)},
           {"left_match", providerMatchJson(reconciliation.left_match)},
           {"right_match", providerMatchJson(reconciliation.right_match)},
           {"confidence", reconciliation.confidence},
@@ -145,6 +213,19 @@ Json candidateJson(const MatchCandidateRecord& record) {
             {"home_team", evidenceJson(reconciliation.home_team)},
             {"away_team", evidenceJson(reconciliation.away_team)},
             {"score", evidenceJson(reconciliation.score)}}}};
+}
+
+Json catalogChangeJson(const CatalogChangeRecord& change) {
+  return {
+      {"revision", change.revision},
+      {"action", catalogChangeActionName(change.action)},
+      {"entity_type", catalogEntityTypeName(change.entity_type)},
+      {"canonical_id", change.canonical_id},
+      {"canonical_name", change.canonical_name},
+      {"provider", optionalString(change.provider)},
+      {"provider_id", optionalString(change.provider_id)},
+      {"provider_match_id", optionalString(change.provider_match_id)},
+      {"provenance", provenanceJson(change.provenance)}};
 }
 
 std::optional<std::string> readOptionalString(const Json& object,
@@ -164,6 +245,16 @@ std::optional<Value> readOptionalNumber(const Json& object,
 
 ProviderMatchReference readProviderMatch(const Json& value) {
   return {value.at("provider").get<std::string>(), value.at("id").get<std::string>()};
+}
+
+ProviderCompetitionReference readProviderCompetition(const Json& value) {
+  return {value.at("provider").get<std::string>(),
+          value.at("id").get<std::string>()};
+}
+
+ProviderSeasonReference readProviderSeason(const Json& value) {
+  return {value.at("provider").get<std::string>(),
+          value.at("id").get<std::string>()};
 }
 
 ProviderTeamReference readProviderTeam(const Json& value) {
@@ -191,6 +282,30 @@ MatchCandidateStatus readCandidateStatus(const std::string& value) {
   throw std::invalid_argument("unknown candidate status '" + value + "'");
 }
 
+CatalogChangeAction readCatalogChangeAction(const std::string& value) {
+  if (value == "add") return CatalogChangeAction::Add;
+  if (value == "map") return CatalogChangeAction::Map;
+  throw std::invalid_argument("unknown catalog change action '" + value + "'");
+}
+
+CatalogEntityType readCatalogEntityType(const std::string& value) {
+  if (value == "competition") return CatalogEntityType::Competition;
+  if (value == "season") return CatalogEntityType::Season;
+  if (value == "team") return CatalogEntityType::Team;
+  if (value == "player") return CatalogEntityType::Player;
+  if (value == "match") return CatalogEntityType::Match;
+  throw std::invalid_argument("unknown catalog entity type '" + value + "'");
+}
+
+ReviewProvenance readProvenance(const Json& value) {
+  return {
+      value.at("actor").get<std::string>(),
+      value.at("source").get<std::string>(),
+      value.at("reason").get<std::string>(),
+      std::chrono::sys_seconds{std::chrono::seconds{
+          value.at("recorded_at_seconds").get<std::int64_t>()}}};
+}
+
 MatchFieldEvidence readEvidence(const Json& value) {
   return {readEvidenceStatus(value.at("status").get<std::string>()),
           value.at("left_source").get<std::string>(),
@@ -200,8 +315,22 @@ MatchFieldEvidence readEvidence(const Json& value) {
           readOptionalString(value, "canonical_value")};
 }
 
-CanonicalIdentityCatalog readCatalog(const Json& value) {
+CanonicalIdentityCatalog readCatalog(const Json& value,
+                                     std::uint32_t format_version) {
   CanonicalIdentityCatalog catalog;
+  if (format_version >= 2) {
+    for (const auto& competition : value.at("competitions")) {
+      catalog.addCompetition(
+          {{competition.at("id").get<Identifier>()},
+           competition.at("name").get<std::string>()});
+    }
+    for (const auto& season : value.at("seasons")) {
+      catalog.addSeason(
+          {{season.at("id").get<Identifier>()},
+           {season.at("competition_id").get<Identifier>()},
+           season.at("name").get<std::string>()});
+    }
+  }
   for (const auto& team : value.at("teams")) {
     catalog.addTeam({{team.at("id").get<Identifier>()},
                      team.at("name").get<std::string>()});
@@ -227,6 +356,17 @@ CanonicalIdentityCatalog readCatalog(const Json& value) {
          {match.at("away_team_id").get<Identifier>()},
          readOptionalNumber<std::int32_t>(match, "home_score"),
          readOptionalNumber<std::int32_t>(match, "away_score")});
+  }
+  if (format_version >= 2) {
+    for (const auto& mapping : value.at("competition_mappings")) {
+      catalog.mapCompetition(
+          readProviderCompetition(mapping),
+          {mapping.at("canonical_id").get<Identifier>()});
+    }
+    for (const auto& mapping : value.at("season_mappings")) {
+      catalog.mapSeason(readProviderSeason(mapping),
+                        {mapping.at("canonical_id").get<Identifier>()});
+    }
   }
   for (const auto& mapping : value.at("team_mappings")) {
     catalog.mapTeam(readProviderTeam(mapping),
@@ -260,9 +400,27 @@ MatchCandidateRecord readCandidate(const Json& value) {
                             ? std::optional<CanonicalMatchId>{}
                             : std::optional<CanonicalMatchId>{{
                                   value.at("accepted_match_id").get<Identifier>()}};
+  const auto provenance =
+      value.contains("decision_provenance") &&
+              !value.at("decision_provenance").is_null()
+          ? std::optional<ReviewProvenance>{
+                readProvenance(value.at("decision_provenance"))}
+          : std::nullopt;
   return {value.at("id").get<std::uint64_t>(), std::move(reconciliation),
           readCandidateStatus(value.at("status").get<std::string>()), accepted,
-          readOptionalString(value, "rejection_reason")};
+          readOptionalString(value, "rejection_reason"), provenance};
+}
+
+CatalogChangeRecord readCatalogChange(const Json& value) {
+  return {value.at("revision").get<std::uint64_t>(),
+          readCatalogChangeAction(value.at("action").get<std::string>()),
+          readCatalogEntityType(value.at("entity_type").get<std::string>()),
+          value.at("canonical_id").get<Identifier>(),
+          value.at("canonical_name").get<std::string>(),
+          readOptionalString(value, "provider"),
+          readOptionalString(value, "provider_id"),
+          readOptionalString(value, "provider_match_id"),
+          readProvenance(value.at("provenance"))};
 }
 
 Json storeJson(const MatchReviewStore& store) {
@@ -270,16 +428,20 @@ Json storeJson(const MatchReviewStore& store) {
   for (const auto* candidate : store.candidates()) {
     candidates.push_back(candidateJson(*candidate));
   }
+  Json catalog_changes = Json::array();
+  for (const auto& change : store.catalogChanges()) {
+    catalog_changes.push_back(catalogChangeJson(change));
+  }
   return {{"format", kFormatName},
           {"version", kMatchReviewFileFormatVersion},
+          {"revision", store.revision()},
           {"catalog", catalogJson(store.catalog())},
+          {"catalog_changes", std::move(catalog_changes)},
           {"candidates", std::move(candidates)}};
 }
 
-}  // namespace
-
-void saveMatchReviewStore(const MatchReviewStore& store,
-                          const std::filesystem::path& path) {
+void writeMatchReviewStore(const MatchReviewStore& store,
+                           const std::filesystem::path& path) {
   auto temporary_path = path;
   temporary_path += ".tmp";
   std::error_code error;
@@ -311,6 +473,59 @@ void saveMatchReviewStore(const MatchReviewStore& store,
   temporary.commit();
 }
 
+std::uint64_t readReviewRevision(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error("Unable to read match review file '" +
+                             path.string() + "'");
+  }
+  try {
+    const auto document = Json::parse(input);
+    if (document.at("format").get<std::string>() != kFormatName) {
+      invalidFile(path, "format marker is not recognized");
+    }
+    const auto version = document.at("version").get<std::uint32_t>();
+    if (version != 1 && version != kMatchReviewFileFormatVersion) {
+      invalidFile(path,
+                  "unsupported format version " + std::to_string(version));
+    }
+    return version == 1 ? 0 : document.at("revision").get<std::uint64_t>();
+  } catch (const nlohmann::json::exception& error) {
+    invalidFile(path, error.what());
+  }
+}
+
+}  // namespace
+
+void createMatchReviewStore(const MatchReviewStore& store,
+                            const std::filesystem::path& path) {
+  ReviewFileLock lock(path);
+  std::error_code error;
+  if (std::filesystem::exists(path, error)) {
+    throw std::runtime_error("Match review file already exists '" +
+                             path.string() + "'");
+  }
+  if (error) {
+    throw std::runtime_error("Unable to inspect match review path '" +
+                             path.string() + "': " + error.message());
+  }
+  writeMatchReviewStore(store, path);
+}
+
+void saveMatchReviewStore(const MatchReviewStore& store,
+                          const std::filesystem::path& path,
+                          std::uint64_t expected_revision) {
+  ReviewFileLock lock(path);
+  const auto actual_revision = readReviewRevision(path);
+  if (actual_revision != expected_revision) {
+    throw std::runtime_error(
+        "Match review file '" + path.string() + "' changed since revision " +
+        std::to_string(expected_revision) + " (current revision " +
+        std::to_string(actual_revision) + ")");
+  }
+  writeMatchReviewStore(store, path);
+}
+
 MatchReviewStore loadMatchReviewStore(const std::filesystem::path& path) {
   try {
     std::ifstream input(path, std::ios::binary);
@@ -323,15 +538,25 @@ MatchReviewStore loadMatchReviewStore(const std::filesystem::path& path) {
       invalidFile(path, "format marker is not recognized");
     }
     const auto version = document.at("version").get<std::uint32_t>();
-    if (version != kMatchReviewFileFormatVersion) {
+    if (version != 1 && version != kMatchReviewFileFormatVersion) {
       invalidFile(path, "unsupported format version " + std::to_string(version));
     }
-    auto catalog = readCatalog(document.at("catalog"));
+    auto catalog = readCatalog(document.at("catalog"), version);
     std::vector<MatchCandidateRecord> candidates;
     for (const auto& candidate : document.at("candidates")) {
       candidates.push_back(readCandidate(candidate));
     }
-    return MatchReviewStore::restore(std::move(catalog), std::move(candidates));
+    const auto revision =
+        version == 1 ? 0 : document.at("revision").get<std::uint64_t>();
+    std::vector<CatalogChangeRecord> catalog_changes;
+    if (version >= 2) {
+      for (const auto& change : document.at("catalog_changes")) {
+        catalog_changes.push_back(readCatalogChange(change));
+      }
+    }
+    return MatchReviewStore::restore(std::move(catalog),
+                                     std::move(candidates), revision,
+                                     std::move(catalog_changes));
   } catch (const nlohmann::json::exception& error) {
     invalidFile(path, error.what());
   } catch (const std::invalid_argument& error) {

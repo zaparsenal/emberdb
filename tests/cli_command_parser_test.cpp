@@ -72,6 +72,10 @@ TEST(CliCommandParserTest, ParsesReconciliationDecisionOptions) {
       std::string_view{"review.json"},
       std::string_view{"--candidate-id"},
       std::string_view{"7"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer@example.com"},
+      std::string_view{"--source"},
+      std::string_view{"provider match pages"},
       std::string_view{"--reason"},
       std::string_view{"Wrong fixture"}};
 
@@ -80,7 +84,77 @@ TEST(CliCommandParserTest, ParsesReconciliationDecisionOptions) {
   EXPECT_EQ(options.command, emberdb::cli::Command::ReconcileReject);
   EXPECT_EQ(options.review, "review.json");
   EXPECT_EQ(options.candidate_id, 7U);
+  EXPECT_EQ(options.actor, "reviewer@example.com");
+  EXPECT_EQ(options.source, "provider match pages");
   EXPECT_EQ(options.reason, "Wrong fixture");
+}
+
+TEST(CliCommandParserTest, ParsesAuditedCatalogAddAndMapOptions) {
+  constexpr std::array add_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"add"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"match"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"100"},
+      std::string_view{"--competition"},
+      std::string_view{"Premier League"},
+      std::string_view{"--season"},
+      std::string_view{"2023/2024"},
+      std::string_view{"--home-team-id"},
+      std::string_view{"1"},
+      std::string_view{"--away-team-id"},
+      std::string_view{"2"},
+      std::string_view{"--home-score"},
+      std::string_view{"2"},
+      std::string_view{"--away-score"},
+      std::string_view{"1"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"fixture"},
+      std::string_view{"--reason"},
+      std::string_view{"Create canonical match"}};
+  const auto add = emberdb::cli::parseOptions(add_arguments);
+
+  EXPECT_EQ(add.command, emberdb::cli::Command::CatalogAdd);
+  EXPECT_EQ(add.catalog_entity, emberdb::CatalogEntityType::Match);
+  EXPECT_EQ(add.canonical_id, 100);
+  EXPECT_EQ(add.home_score, 2);
+  EXPECT_EQ(add.away_score, 1);
+
+  constexpr std::array map_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"map"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"player"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"10"},
+      std::string_view{"--provider"},
+      std::string_view{"Metrica"},
+      std::string_view{"--provider-id"},
+      std::string_view{"Player1"},
+      std::string_view{"--provider-match-id"},
+      std::string_view{"42"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"lineup"},
+      std::string_view{"--reason"},
+      std::string_view{"Verified lineup"}};
+  const auto map = emberdb::cli::parseOptions(map_arguments);
+
+  EXPECT_EQ(map.command, emberdb::cli::Command::CatalogMap);
+  EXPECT_EQ(map.catalog_entity, emberdb::CatalogEntityType::Player);
+  EXPECT_EQ(map.provider, "Metrica");
+  EXPECT_EQ(map.provider_id, "Player1");
+  EXPECT_EQ(map.provider_match_id, "42");
 }
 
 TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
@@ -108,6 +182,32 @@ TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
       std::string_view{"events.csv"}};
   EXPECT_THROW(
       static_cast<void>(emberdb::cli::parseOptions(missing_direction)),
+      std::runtime_error);
+
+  constexpr std::array invalid_catalog_scope{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"map"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"competition"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"1"},
+      std::string_view{"--provider"},
+      std::string_view{"StatsBomb"},
+      std::string_view{"--provider-id"},
+      std::string_view{"2"},
+      std::string_view{"--provider-match-id"},
+      std::string_view{"42"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"fixture"},
+      std::string_view{"--reason"},
+      std::string_view{"Mapping"}};
+  EXPECT_THROW(
+      static_cast<void>(emberdb::cli::parseOptions(invalid_catalog_scope)),
       std::runtime_error);
 }
 

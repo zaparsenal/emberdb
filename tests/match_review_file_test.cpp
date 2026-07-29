@@ -24,16 +24,28 @@ class MatchReviewFileTest : public ::testing::Test {
     std::error_code error;
     std::filesystem::remove(path_, error);
     std::filesystem::remove(path_.string() + ".tmp", error);
+    std::filesystem::remove(path_.string() + ".lock", error);
+  }
+
+  emberdb::ReviewProvenance provenance(std::string reason) const {
+    return {"reviewer", "unit-test", std::move(reason),
+            std::chrono::sys_seconds{std::chrono::seconds{1'700'000'000}}};
   }
 
   emberdb::MatchReviewStore store() const {
     emberdb::CanonicalIdentityCatalog catalog;
+    catalog.addCompetition({{20}, "Premier League"});
+    catalog.addSeason({{30}, {20}, "2017/2018"});
     catalog.addTeam({{1}, "Arsenal"});
     catalog.addTeam({{2}, "Leicester City"});
     catalog.addPlayer({{10}, "Alex Forward"});
     catalog.addMatch({{100}, "Premier League", "2017/2018",
                       std::chrono::sys_seconds{std::chrono::seconds{1'500'000'000}},
                       {1}, {2}, 4, 3});
+    catalog.mapCompetition({"StatsBomb", "2"}, {20});
+    catalog.mapCompetition({"Wyscout", "364"}, {20});
+    catalog.mapSeason({"StatsBomb", "44"}, {30});
+    catalog.mapSeason({"Wyscout", "181150"}, {30});
     catalog.mapTeam({"StatsBomb", "10", std::nullopt}, {1});
     catalog.mapTeam({"StatsBomb", "20", std::nullopt}, {2});
     catalog.mapTeam({"Wyscout", "1609", std::nullopt}, {1});
@@ -67,16 +79,24 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   const auto ids = original.addCandidates(
       {candidate(original, "2499719"), candidate(original, "2499720"),
        candidate(original, "2499721")});
-  original.accept(ids[0], {100});
-  original.reject(ids[1], "Provider correction identifies another fixture");
+  original.accept(ids[0], {100}, provenance("Metadata agrees"));
+  original.reject(
+      ids[1],
+      provenance("Provider correction identifies another fixture"));
 
-  emberdb::saveMatchReviewStore(original, path_);
+  emberdb::createMatchReviewStore(original, path_);
   const auto loaded = emberdb::loadMatchReviewStore(path_);
 
+  EXPECT_EQ(loaded.catalog().competitions().size(), 1U);
+  EXPECT_EQ(loaded.catalog().seasons().size(), 1U);
   EXPECT_EQ(loaded.catalog().teams().size(), 2U);
   EXPECT_EQ(loaded.catalog().players().size(), 1U);
   EXPECT_EQ(loaded.catalog().matches().size(), 1U);
   EXPECT_EQ(loaded.catalog().playerMappings().begin()->first.match_id, "match-1");
+  EXPECT_EQ(loaded.catalog().resolveCompetition({"Wyscout", "364"}),
+            emberdb::CanonicalCompetitionId{20});
+  EXPECT_EQ(loaded.catalog().resolveSeason({"StatsBomb", "44"}),
+            emberdb::CanonicalSeasonId{30});
   EXPECT_EQ(loaded.catalog().resolveMatch({"StatsBomb", "12345"}),
             emberdb::CanonicalMatchId{100});
   ASSERT_EQ(loaded.candidates().size(), 3U);
@@ -84,6 +104,8 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
             emberdb::MatchCandidateStatus::Accepted);
   EXPECT_EQ(loaded.candidate(ids[1])->rejection_reason,
             "Provider correction identifies another fixture");
+  EXPECT_EQ(loaded.candidate(ids[0])->decision_provenance->source,
+            "unit-test");
   EXPECT_EQ(loaded.candidate(ids[2])->status,
             emberdb::MatchCandidateStatus::Unresolved);
   EXPECT_DOUBLE_EQ(loaded.candidate(ids[2])->reconciliation.confidence, 1.0);
@@ -94,10 +116,11 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
 TEST_F(MatchReviewFileTest, AtomicallyReplacesExistingReviewFile) {
   auto original = store();
   const auto id = original.addCandidates({candidate(original, "2499719")})[0];
-  emberdb::saveMatchReviewStore(original, path_);
-  original.reject(id, "Not the same match");
+  emberdb::createMatchReviewStore(original, path_);
+  const auto persisted_revision = original.revision();
+  original.reject(id, provenance("Not the same match"));
 
-  emberdb::saveMatchReviewStore(original, path_);
+  emberdb::saveMatchReviewStore(original, path_, persisted_revision);
 
   EXPECT_EQ(emberdb::loadMatchReviewStore(path_).candidate(id)->status,
             emberdb::MatchCandidateStatus::Rejected);
@@ -106,12 +129,38 @@ TEST_F(MatchReviewFileTest, AtomicallyReplacesExistingReviewFile) {
 
 TEST_F(MatchReviewFileTest, RefusesStaleTemporaryFileWithoutChangingStore) {
   auto original = store();
-  emberdb::saveMatchReviewStore(original, path_);
+  emberdb::createMatchReviewStore(original, path_);
   std::ofstream(path_.string() + ".tmp") << "stale";
-  original.catalog().addPlayer({{11}, "Another Player"});
+  const auto persisted_revision = original.revision();
+  original.addPlayer({{11}, "Another Player"},
+                     provenance("Add roster member"));
 
-  EXPECT_THROW(emberdb::saveMatchReviewStore(original, path_), std::runtime_error);
+  EXPECT_THROW(
+      emberdb::saveMatchReviewStore(original, path_, persisted_revision),
+      std::runtime_error);
   EXPECT_EQ(emberdb::loadMatchReviewStore(path_).catalog().players().size(), 1U);
+}
+
+TEST_F(MatchReviewFileTest, RejectsStaleRevisionWithoutOverwritingNewerStore) {
+  auto original = store();
+  emberdb::createMatchReviewStore(original, path_);
+  auto first = emberdb::loadMatchReviewStore(path_);
+  auto stale = emberdb::loadMatchReviewStore(path_);
+  const auto shared_revision = first.revision();
+  first.addPlayer({{11}, "First Player"}, provenance("First edit"));
+  stale.addPlayer({{12}, "Stale Player"}, provenance("Stale edit"));
+
+  emberdb::saveMatchReviewStore(first, path_, shared_revision);
+  EXPECT_THROW(
+      emberdb::saveMatchReviewStore(stale, path_, shared_revision),
+      std::runtime_error);
+
+  const auto loaded = emberdb::loadMatchReviewStore(path_);
+  EXPECT_NE(loaded.catalog().player({11}), nullptr);
+  EXPECT_EQ(loaded.catalog().player({12}), nullptr);
+  ASSERT_EQ(loaded.catalogChanges().size(), 1U);
+  EXPECT_EQ(loaded.catalogChanges()[0].canonical_name, "First Player");
+  EXPECT_EQ(loaded.catalogChanges()[0].provenance.reason, "First edit");
 }
 
 TEST_F(MatchReviewFileTest, RejectsUnsupportedAndMalformedFilesWithContext) {

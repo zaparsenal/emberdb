@@ -7,7 +7,7 @@ EmberDB is a local columnar analytics engine specialized for football event data
 Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
-- typed `CanonicalMatch`, `CanonicalTeam`, and `CanonicalPlayer` catalogs with
+- typed canonical competition, season, match, team, and player catalogs with
   provider-to-canonical ID mappings;
 - a provider adapter interface with StatsBomb Open Data JSON, Metrica Sports CSV, and
   the open Wyscout research JSON adapters;
@@ -17,6 +17,8 @@ Implemented milestones include:
   confidence;
 - a durable review store for canonical catalogs, provider mappings, generated match
   candidates, evidence, and accepted or rejected decisions;
+- audited catalog CLI commands to initialize a review store, add canonical entities,
+  map provider identities, and inspect current state or change history;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
   candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
@@ -98,8 +100,9 @@ source-schema and coordinate-system rules.
 
 ## Canonical identity catalogs
 
-`CanonicalIdentityCatalog` stores typed canonical match, team, and player records
-separately from provider metadata. A provider identity can map to only one canonical ID,
+`CanonicalIdentityCatalog` stores typed canonical competition, season, match, team, and
+player records separately from provider metadata. A canonical season belongs to an
+existing canonical competition. A provider identity can map to only one canonical ID,
 while several provider identities may map to the same canonical entity. Conflicting
 remaps and mappings to unknown canonical records are rejected.
 
@@ -114,10 +117,10 @@ Metrica has no stable team IDs in its standard anonymized CSV. Call
 `Home` and `Away` labels within one match. They are deliberately never global mappings.
 
 `resolveEvent` returns a `CanonicalEventIdentity` alongside an existing normalized
-event; it does not overwrite the event's provider IDs. Catalog construction and editing
-remain programmatic APIs declared under `include/emberdb/identity`. A complete catalog,
-including canonical match/team/player records and all provider mappings, can be saved in
-the separate match review file. It is never embedded in an event `.ember` file.
+event; it does not overwrite the event's provider IDs. Audited catalog construction and
+mapping APIs live on `MatchReviewStore`; each mutation records actor, source, reason,
+timestamp, and revision. A complete catalog and its audit records can be saved in the
+separate match review file. It is never embedded in an event `.ember` file.
 
 ## Match reconciliation
 
@@ -126,11 +129,12 @@ adding a canonical mapping. Each comparison retains the left and right provider/
 and classifies competition, season, kickoff, home team, away team, and score as
 `Missing`, `Agreeing`, `Conflicting`, or `Uncertain`.
 
-Team agreement requires existing provider-to-canonical team mappings. Scores compare
-exactly. Kickoffs agree within five minutes, are uncertain through 24 hours, and conflict
-beyond that by default. Cross-provider competition and season names use only
-case-insensitive, whitespace-normalized equality; unequal names remain uncertain rather
-than being fuzzily guessed. Same-provider IDs compare exactly.
+Team agreement requires existing provider-to-canonical team mappings. Explicit
+competition and season mappings take precedence over provider labels. Without mappings,
+cross-provider competition and season names use only case-insensitive,
+whitespace-normalized equality; unequal names remain uncertain rather than being fuzzily
+guessed. Same-provider IDs compare exactly. Scores compare exactly. Kickoffs agree within
+five minutes, are uncertain through 24 hours, and conflict beyond that by default.
 
 The confidence weights are home team 0.25, away team 0.25, kickoff 0.20, score 0.15,
 competition 0.10, and season 0.05. Agreeing fields receive full weight, uncertain fields
@@ -141,11 +145,12 @@ one canonical team is also a conflict. `findMatchCandidates` returns only qualif
 candidates, ordered by confidence with deterministic provider-ID tie breaking.
 
 Candidate generation never accepts automatically. A reviewer can retain a candidate as
-`unresolved`, reject it with a required reason, or accept it against an existing
-`CanonicalMatch`. Acceptance adds both provider-match-to-canonical-match mappings to the
-catalog. Repeating the identical acceptance or rejection is safe. Attempting to reverse
-a finalized decision, change its canonical match or rejection reason, or conflict with
-an existing provider match mapping fails with a clear error.
+`unresolved`, reject it with required provenance, or accept it against an existing
+`CanonicalMatch` with the same actor/source/reason/timestamp record. Acceptance adds both
+provider-match-to-canonical-match mappings to the catalog. Repeating the identical
+acceptance or rejection is safe. Attempting to reverse a finalized decision, change its
+canonical match or rejection reason, or conflict with an existing provider match mapping
+fails with a clear error.
 
 Generated confidence and all six per-field evidence records remain fixed in the audit
 record. Regenerating an existing ordered provider pair reuses its candidate ID and does
@@ -342,14 +347,75 @@ no matching rows returns no rows.
 The programmatic aggregation API is declared in
 `include/emberdb/query/aggregation_query.h`.
 
+## Catalog authoring CLI
+
+Create an empty review store:
+
+```bash
+./build/emberdb_cli catalog init --review match-review.json
+```
+
+Add canonical entities one at a time. Every mutation requires an actor, evidence source,
+and reason; EmberDB records those values with the current UTC timestamp and resulting
+store revision.
+
+```bash
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity competition --canonical-id 20 --name "Premier League" \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Create canonical competition"
+
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity season --canonical-id 30 --competition-id 20 --name "2023/2024" \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Create canonical season"
+
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity team --canonical-id 1 --name "Arsenal" \
+  --actor "reviewer@example.com" --source "provider team pages" \
+  --reason "Create canonical team"
+```
+
+`competition`, `team`, and `player` additions require `--name`. A `season` also
+requires `--competition-id`. A `match` requires `--competition`, `--season`,
+`--home-team-id`, and `--away-team-id`; `--kickoff-seconds` is optional and
+`--home-score`/`--away-score` must appear together.
+
+Map provider identities only after the canonical target exists:
+
+```bash
+./build/emberdb_cli catalog map --review match-review.json \
+  --entity competition --canonical-id 20 \
+  --provider StatsBomb --provider-id 2 \
+  --actor "reviewer@example.com" --source "StatsBomb competitions.json" \
+  --reason "Verified provider competition"
+
+./build/emberdb_cli catalog map --review match-review.json \
+  --entity player --canonical-id 10 \
+  --provider Metrica --provider-id Player1 --provider-match-id 42 \
+  --actor "reviewer@example.com" --source "match lineup" \
+  --reason "Verified match-local player"
+```
+
+`--provider-match-id` is allowed only for match-local team or player references.
+Provider match mappings remain owned by accepted reconciliation decisions.
+Repeating an identical mapping is a no-op and does not consume a revision.
+
+Review the complete canonical catalog and mappings, or the append-only authoring
+history:
+
+```bash
+./build/emberdb_cli catalog list --review match-review.json
+./build/emberdb_cli catalog history --review match-review.json
+```
+
 ## Match reconciliation review CLI
 
-The review CLI operates on an existing versioned review store. Catalog authoring remains
-explicit and programmatic: construct a `CanonicalIdentityCatalog`, pass it to
-`MatchReviewStore`, and call `saveMatchReviewStore` once to create the initial file.
-The APIs are declared in `include/emberdb/reconciliation/match_review.h` and
-`include/emberdb/persistence/match_review_file.h`. This keeps provider identity
-decisions out of command-line heuristics.
+The reconciliation CLI operates on an existing versioned review store created and
+populated through the catalog commands or the equivalent APIs in
+`include/emberdb/reconciliation/match_review.h` and
+`include/emberdb/persistence/match_review_file.h`. Provider identity decisions always
+remain explicit; the CLI does not infer mappings from similar names.
 
 Generate qualified candidates from StatsBomb and Wyscout match metadata:
 
@@ -364,8 +430,8 @@ Generate qualified candidates from StatsBomb and Wyscout match metadata:
 
 Generation uses the canonical team mappings in the review store, assigns stable numeric
 candidate IDs, preserves previously generated records, and atomically saves the updated
-store. The metadata providers currently supported by this command are `statsbomb` and
-`wyscout`.
+store. Explicit competition and season mappings are also used when available. The
+metadata providers currently supported by this command are `statsbomb` and `wyscout`.
 
 List all candidates or filter by status:
 
@@ -393,7 +459,10 @@ Accept against an existing canonical match:
 ./build/emberdb_cli reconcile accept \
   --review match-review.json \
   --candidate-id 1 \
-  --canonical-match-id 100
+  --canonical-match-id 100 \
+  --actor "reviewer@example.com" \
+  --source "provider match pages" \
+  --reason "Teams, kickoff, and score agree"
 ```
 
 Reject with an auditable reason:
@@ -402,11 +471,15 @@ Reject with an auditable reason:
 ./build/emberdb_cli reconcile reject \
   --review match-review.json \
   --candidate-id 1 \
+  --actor "reviewer@example.com" \
+  --source "provider match pages" \
   --reason "Provider correction identifies another fixture"
 ```
 
 Acceptance and rejection rewrite the review store atomically. Identical repeated
-commands succeed; conflicting finalized decisions fail without changing the file.
+commands succeed; conflicting finalized decisions fail without changing the file. Each
+write checks the revision that was loaded while holding an exclusive sibling lock, so a
+stale writer cannot overwrite a newer review.
 
 ## Persistent event file format
 
@@ -436,17 +509,20 @@ a version 2 database.
 ## Persistent match review format
 
 Match review files are separate UTF-8 JSON documents identified by
-`emberdb-match-review` and format version 1. They store canonical team, player, and match
-catalogs; team, player, and match provider mappings; generated match candidates; numeric
-confidence; complete per-field evidence; decision status; accepted canonical match IDs;
-and rejection reasons.
+`emberdb-match-review` and format version 2. They store canonical competition, season,
+team, player, and match catalogs; all provider mappings; generated match candidates;
+numeric confidence; complete per-field evidence; decision status and provenance;
+catalog-change provenance; and a monotonic store revision. Version 1 review files load
+as revision zero with empty competition/season catalogs and no synthesized mappings;
+the next successful write upgrades them to version 2.
 
 Loading rebuilds the canonical catalog through its validation APIs and rejects duplicate
-records, dangling mappings, invalid candidate values, contradictory decision fields, or
-accepted candidates whose durable mappings do not agree. Unsupported versions fail
-explicitly. Saving writes a sibling `.tmp` file and renames it only after the complete
-document is written. Existing review files are atomically replaced; a stale temporary
-file causes the save to fail without touching the current review file.
+records, dangling mappings, invalid candidate values, contradictory decision fields,
+invalid audit records, or accepted candidates whose durable mappings do not agree.
+Unsupported versions fail explicitly. Saving holds a sibling `.lock`, verifies the
+expected revision, writes a sibling `.tmp`, and renames it only after the complete
+document is written. A stale writer, lock, or temporary file causes the save to fail
+without touching the current review file.
 
 ## Data and coordinate semantics
 
@@ -513,11 +589,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - The Wyscout event CLI reads the open 2019 research export only and does not
   automatically join the separately supported player, team, competition, or match
   metadata files.
-- Canonical catalog authoring and provider mapping edits are still programmatic. The
-  reconciliation CLI expects an existing review store and deliberately does not infer
-  team, player, competition, or season identity.
+- Catalog authoring is intentionally one explicit entity or mapping per command. There
+  is no bulk canonical manifest import or metadata-assisted team/player/competition/
+  season candidate review yet.
 - Match candidate generation through the CLI currently supports StatsBomb and Wyscout
-  metadata. There is no competition mapping catalog or automatic candidate acceptance.
+  metadata. There is no automatic candidate acceptance.
 - Accepted match mappings do not yet reconcile or rewrite football events.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
@@ -525,9 +601,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is an explicit catalog-authoring and entity-review
-workflow for provider metadata: import canonical catalog inputs, manage team/player plus
-competition/season mappings, and review those identity decisions with the same durable
-audit discipline. Event reconciliation should remain deferred until those prerequisite
-entities are durable and explainable. SQL is also deliberately deferred; when resumed,
-it should translate into the existing typed operations rather than bypassing them.
+The recommended next milestone is metadata-assisted entity candidate review: stage
+provider competition, season, team, and player metadata; generate explainable candidates
+without mutating mappings; and accept or reject those candidates into the existing
+revisioned audit store. A small bulk canonical-manifest importer can follow once its
+validation and provenance rules are defined. Event reconciliation should remain
+deferred until those prerequisite identities have been exercised on real provider
+catalogs. SQL is also deliberately deferred; when resumed, it should translate into the
+existing typed operations rather than bypassing them.

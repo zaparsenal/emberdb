@@ -8,6 +8,11 @@
 
 namespace {
 
+emberdb::ReviewProvenance provenance(std::string reason) {
+  return {"reviewer", "unit-test", std::move(reason),
+          std::chrono::sys_seconds{std::chrono::seconds{1'700'000'000}}};
+}
+
 emberdb::MatchReviewStore reviewStore() {
   emberdb::CanonicalIdentityCatalog catalog;
   catalog.addTeam({{1}, "Arsenal"});
@@ -58,18 +63,49 @@ TEST(MatchReviewStoreTest, AddsCandidatesOnceAndListsByStatus) {
   EXPECT_TRUE(store.candidates(emberdb::MatchCandidateStatus::Accepted).empty());
   ASSERT_NE(store.candidate(first[0]), nullptr);
   EXPECT_DOUBLE_EQ(store.candidate(first[0])->reconciliation.confidence, 1.0);
+  EXPECT_EQ(store.revision(), 1U);
+}
+
+TEST(MatchReviewStoreTest, AuditsCatalogAuthoringAndMappingRevisions) {
+  emberdb::MatchReviewStore store;
+  store.addCompetition({{20}, "Premier League"},
+                       provenance("Create competition"));
+  store.addSeason({{30}, {20}, "2023/2024"},
+                  provenance("Create season"));
+  store.addTeam({{1}, "North FC"}, provenance("Create team"));
+  store.addPlayer({{10}, "Alex Forward"}, provenance("Create player"));
+  store.mapCompetition({"StatsBomb", "2"}, {20},
+                       provenance("Map provider competition"));
+  store.mapSeason({"StatsBomb", "44"}, {30},
+                  provenance("Map provider season"));
+  store.mapTeam({"StatsBomb", "10", std::nullopt}, {1},
+                provenance("Map provider team"));
+  store.mapPlayer({"Metrica", "Player1", "42"}, {10},
+                  provenance("Map match-local player"));
+  const auto revision = store.revision();
+  store.mapPlayer({"Metrica", "Player1", "42"}, {10},
+                  provenance("Repeat mapping"));
+
+  EXPECT_EQ(revision, 8U);
+  EXPECT_EQ(store.revision(), revision);
+  ASSERT_EQ(store.catalogChanges().size(), 8U);
+  EXPECT_EQ(store.catalogChanges().front().entity_type,
+            emberdb::CatalogEntityType::Competition);
+  EXPECT_EQ(store.catalogChanges().back().provider_match_id, "42");
+  EXPECT_EQ(store.catalogChanges().back().provenance.actor, "reviewer");
 }
 
 TEST(MatchReviewStoreTest, AcceptsIdempotentlyAndCreatesBothMappings) {
   auto store = reviewStore();
   const auto id = store.addCandidates({candidate(store)})[0];
 
-  store.accept(id, {100});
-  store.accept(id, {100});
+  store.accept(id, {100}, provenance("Metadata agrees"));
+  store.accept(id, {100}, provenance("Repeated decision"));
 
   ASSERT_NE(store.candidate(id), nullptr);
   EXPECT_EQ(store.candidate(id)->status, emberdb::MatchCandidateStatus::Accepted);
   EXPECT_EQ(store.candidate(id)->accepted_match_id, emberdb::CanonicalMatchId{100});
+  EXPECT_EQ(store.candidate(id)->decision_provenance->actor, "reviewer");
   EXPECT_EQ(store.catalog().resolveMatch({"StatsBomb", "12345"}),
             emberdb::CanonicalMatchId{100});
   EXPECT_EQ(store.catalog().resolveMatch({"Wyscout", "2499719"}),
@@ -80,8 +116,10 @@ TEST(MatchReviewStoreTest, RejectsIdempotentlyAndPreservesReason) {
   auto store = reviewStore();
   const auto id = store.addCandidates({candidate(store)})[0];
 
-  store.reject(id, "Broadcast date proves these are different fixtures");
-  store.reject(id, "Broadcast date proves these are different fixtures");
+  store.reject(
+      id, provenance("Broadcast date proves these are different fixtures"));
+  store.reject(
+      id, provenance("Broadcast date proves these are different fixtures"));
 
   EXPECT_EQ(store.candidate(id)->status, emberdb::MatchCandidateStatus::Rejected);
   EXPECT_EQ(store.candidate(id)->rejection_reason,
@@ -92,24 +130,32 @@ TEST(MatchReviewStoreTest, RejectsIdempotentlyAndPreservesReason) {
 TEST(MatchReviewStoreTest, RejectsConflictingFinalDecisions) {
   auto accepted = reviewStore();
   const auto accepted_id = accepted.addCandidates({candidate(accepted)})[0];
-  accepted.accept(accepted_id, {100});
-  EXPECT_THROW(accepted.reject(accepted_id, "Changed my mind"),
+  accepted.accept(accepted_id, {100}, provenance("Metadata agrees"));
+  EXPECT_THROW(accepted.reject(accepted_id, provenance("Changed my mind")),
                std::invalid_argument);
-  EXPECT_THROW(accepted.accept(accepted_id, {101}), std::invalid_argument);
+  EXPECT_THROW(
+      accepted.accept(accepted_id, {101}, provenance("Changed match")),
+      std::invalid_argument);
 
   auto rejected = reviewStore();
   const auto rejected_id = rejected.addCandidates({candidate(rejected)})[0];
-  rejected.reject(rejected_id, "Wrong fixture");
-  EXPECT_THROW(rejected.accept(rejected_id, {100}), std::invalid_argument);
-  EXPECT_THROW(rejected.reject(rejected_id, "Different reason"),
+  rejected.reject(rejected_id, provenance("Wrong fixture"));
+  EXPECT_THROW(
+      rejected.accept(rejected_id, {100}, provenance("Changed my mind")),
+      std::invalid_argument);
+  EXPECT_THROW(rejected.reject(rejected_id, provenance("Different reason")),
                std::invalid_argument);
 }
 
 TEST(MatchReviewStoreTest, ValidatesBeforeCreatingAnyAcceptedMapping) {
-  auto store = reviewStore();
+  const auto original = reviewStore();
+  auto catalog = original.catalog();
+  catalog.mapMatch({"Wyscout", "2499719"}, {101});
+  emberdb::MatchReviewStore store(std::move(catalog));
   const auto id = store.addCandidates({candidate(store)})[0];
-  store.catalog().mapMatch({"Wyscout", "2499719"}, {101});
-  EXPECT_THROW(store.accept(id, {100}), std::invalid_argument);
+  EXPECT_THROW(
+      store.accept(id, {100}, provenance("Metadata agrees")),
+      std::invalid_argument);
   EXPECT_FALSE(store.catalog().resolveMatch({"StatsBomb", "12345"}));
   EXPECT_EQ(store.candidate(id)->status,
             emberdb::MatchCandidateStatus::Unresolved);
@@ -118,7 +164,7 @@ TEST(MatchReviewStoreTest, ValidatesBeforeCreatingAnyAcceptedMapping) {
 TEST(MatchReviewStoreTest, RejectsBlankReasonsAndDisqualifiedComparisons) {
   auto store = reviewStore();
   const auto id = store.addCandidates({candidate(store)})[0];
-  EXPECT_THROW(store.reject(id, " \t"), std::invalid_argument);
+  EXPECT_THROW(store.reject(id, provenance(" \t")), std::invalid_argument);
   auto comparison = candidate(store);
   comparison.is_candidate = false;
   EXPECT_THROW(static_cast<void>(store.addCandidates({comparison})),
@@ -131,14 +177,15 @@ TEST(MatchReviewStoreTest, RejectsInvalidPersistedCandidateSnapshots) {
   reconciliation.confidence = 2.0;
   emberdb::MatchCandidateRecord record{1, reconciliation,
                                        emberdb::MatchCandidateStatus::Unresolved,
-                                       std::nullopt, std::nullopt};
+                                       std::nullopt, std::nullopt,
+                                       std::nullopt};
   EXPECT_THROW(static_cast<void>(emberdb::MatchReviewStore::restore(
                    store.catalog(), {record})),
                std::invalid_argument);
 
   reconciliation.confidence = 1.0;
   record = {1, reconciliation, emberdb::MatchCandidateStatus::Accepted,
-            emberdb::CanonicalMatchId{100}, std::nullopt};
+            emberdb::CanonicalMatchId{100}, std::nullopt, std::nullopt};
   EXPECT_THROW(static_cast<void>(emberdb::MatchReviewStore::restore(
                    store.catalog(), {record})),
                std::invalid_argument);

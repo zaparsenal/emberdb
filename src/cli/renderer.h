@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -34,5 +35,14 @@ void printCandidateAccepted(std::ostream& output, std::uint64_t candidate_id,
                             Identifier canonical_match_id);
 void printCandidateRejected(std::ostream& output, std::uint64_t candidate_id,
                             const std::string& reason);
+void printCatalogCreated(std::ostream& output,
+                         const std::filesystem::path& path);
+void printCatalogSummary(std::ostream& output,
+                         const MatchReviewStore& store);
+void printCatalogHistory(
+    std::ostream& output,
+    const std::vector<CatalogChangeRecord>& catalog_changes);
+void printCatalogMutation(std::ostream& output, std::uint64_t revision,
+                          const CatalogChangeRecord* change);
 
 }  // namespace emberdb::cli
