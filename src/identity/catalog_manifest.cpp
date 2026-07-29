@@ -410,6 +410,74 @@ bool sameMatch(const CanonicalMatch& existing,
          existing.away_score == expected.away_score;
 }
 
+CanonicalMatch manifestMatch(const CatalogManifestEntry& entry,
+                             const CanonicalIdentityCatalog& catalog) {
+  const auto* season = catalog.season({entry.season_id});
+  if (season == nullptr) {
+    throw std::invalid_argument(
+        "match references unknown canonical season " +
+        std::to_string(entry.season_id));
+  }
+  if (season->status != CanonicalEntityStatus::Active) {
+    throw std::invalid_argument(
+        "match references inactive canonical season " +
+        std::to_string(entry.season_id));
+  }
+  const auto* competition = catalog.competition(season->competition_id);
+  if (competition == nullptr) {
+    throw std::invalid_argument(
+        "match season references an unknown competition");
+  }
+  if (competition->status != CanonicalEntityStatus::Active) {
+    throw std::invalid_argument(
+        "match season references an inactive competition");
+  }
+  const auto* home_team = catalog.team({entry.home_team_id});
+  if (home_team == nullptr) {
+    throw std::invalid_argument(
+        "match references unknown home team " +
+        std::to_string(entry.home_team_id));
+  }
+  if (home_team->status != CanonicalEntityStatus::Active) {
+    throw std::invalid_argument(
+        "match references inactive home team " +
+        std::to_string(entry.home_team_id));
+  }
+  const auto* away_team = catalog.team({entry.away_team_id});
+  if (away_team == nullptr) {
+    throw std::invalid_argument(
+        "match references unknown away team " +
+        std::to_string(entry.away_team_id));
+  }
+  if (away_team->status != CanonicalEntityStatus::Active) {
+    throw std::invalid_argument(
+        "match references inactive away team " +
+        std::to_string(entry.away_team_id));
+  }
+  if (entry.home_team_id == entry.away_team_id) {
+    throw std::invalid_argument("canonical match teams must be different");
+  }
+  if (entry.home_score.has_value() != entry.away_score.has_value() ||
+      (entry.home_score &&
+       (*entry.home_score < 0 || *entry.away_score < 0))) {
+    throw std::invalid_argument(
+        "canonical match scores must be non-negative and both present or "
+        "missing");
+  }
+  return {{entry.canonical_id},
+          competition->name,
+          season->name,
+          entry.kickoff_seconds
+              ? std::optional<std::chrono::sys_seconds>{
+                    std::chrono::sys_seconds{
+                        std::chrono::seconds{*entry.kickoff_seconds}}}
+              : std::nullopt,
+          {entry.home_team_id},
+          {entry.away_team_id},
+          entry.home_score,
+          entry.away_score};
+}
+
 std::optional<Identifier> existingEntityId(
     const CanonicalIdentityCatalog& catalog, CatalogEntityType entity_type,
     Identifier canonical_id) {
@@ -653,6 +721,25 @@ CatalogManifestImportPlan planCatalogManifestImport(
 
       try {
         const auto& catalog = plan.resulting_store.catalog();
+        if (entry.entity_type == CatalogEntityType::Season) {
+          const auto* competition =
+              catalog.competition({entry.competition_id});
+          if (competition == nullptr) {
+            throw std::invalid_argument(
+                "season references unknown canonical competition " +
+                std::to_string(entry.competition_id));
+          }
+          if (competition->status != CanonicalEntityStatus::Active) {
+            throw std::invalid_argument(
+                "season references inactive canonical competition " +
+                std::to_string(entry.competition_id));
+          }
+        }
+        const auto expected_match =
+            entry.entity_type == CatalogEntityType::Match
+                ? std::optional<CanonicalMatch>{
+                      manifestMatch(entry, catalog)}
+                : std::nullopt;
         if (existingEntityId(catalog, entry.entity_type,
                              entry.canonical_id)) {
           bool matches = false;
@@ -693,33 +780,8 @@ CatalogManifestImportPlan planCatalogManifestImport(
               break;
             }
             case CatalogEntityType::Match: {
-              const auto* season = catalog.season({entry.season_id});
-              if (season == nullptr) {
-                throw std::invalid_argument(
-                    "match references unknown canonical season " +
-                    std::to_string(entry.season_id));
-              }
-              const auto* competition =
-                  catalog.competition(season->competition_id);
-              if (competition == nullptr) {
-                throw std::invalid_argument(
-                    "match season references an unknown competition");
-              }
-              const CanonicalMatch expected{
-                  {entry.canonical_id},
-                  competition->name,
-                  season->name,
-                  entry.kickoff_seconds
-                      ? std::optional<std::chrono::sys_seconds>{
-                            std::chrono::sys_seconds{std::chrono::seconds{
-                                *entry.kickoff_seconds}}}
-                      : std::nullopt,
-                  {entry.home_team_id},
-                  {entry.away_team_id},
-                  entry.home_score,
-                  entry.away_score};
               matches = sameMatch(*catalog.match({entry.canonical_id}),
-                                  expected);
+                                  *expected_match);
               conflict = "existing canonical match metadata differs";
               break;
             }
@@ -742,12 +804,6 @@ CatalogManifestImportPlan planCatalogManifestImport(
                 {{entry.canonical_id}, entry.name}, std::move(provenance));
             break;
           case CatalogEntityType::Season:
-            if (plan.resulting_store.catalog().competition(
-                    {entry.competition_id}) == nullptr) {
-              throw std::invalid_argument(
-                  "season references unknown canonical competition " +
-                  std::to_string(entry.competition_id));
-            }
             plan.resulting_store.addSeason(
                 {{entry.canonical_id}, {entry.competition_id}, entry.name},
                 std::move(provenance));
@@ -760,49 +816,10 @@ CatalogManifestImportPlan planCatalogManifestImport(
             plan.resulting_store.addPlayer(
                 {{entry.canonical_id}, entry.name}, std::move(provenance));
             break;
-          case CatalogEntityType::Match: {
-            const auto* season =
-                plan.resulting_store.catalog().season({entry.season_id});
-            if (season == nullptr) {
-              throw std::invalid_argument(
-                  "match references unknown canonical season " +
-                  std::to_string(entry.season_id));
-            }
-            const auto* competition =
-                plan.resulting_store.catalog().competition(
-                    season->competition_id);
-            if (competition == nullptr) {
-              throw std::invalid_argument(
-                  "match season references an unknown competition");
-            }
-            if (plan.resulting_store.catalog().team(
-                    {entry.home_team_id}) == nullptr) {
-              throw std::invalid_argument(
-                  "match references unknown home team " +
-                  std::to_string(entry.home_team_id));
-            }
-            if (plan.resulting_store.catalog().team(
-                    {entry.away_team_id}) == nullptr) {
-              throw std::invalid_argument(
-                  "match references unknown away team " +
-                  std::to_string(entry.away_team_id));
-            }
+          case CatalogEntityType::Match:
             plan.resulting_store.addMatch(
-                {{entry.canonical_id},
-                 competition->name,
-                 season->name,
-                 entry.kickoff_seconds
-                     ? std::optional<std::chrono::sys_seconds>{
-                           std::chrono::sys_seconds{std::chrono::seconds{
-                               *entry.kickoff_seconds}}}
-                     : std::nullopt,
-                 {entry.home_team_id},
-                 {entry.away_team_id},
-                 entry.home_score,
-                 entry.away_score},
-                std::move(provenance));
+                *expected_match, std::move(provenance));
             break;
-          }
         }
         entity_actions[entry_index] = CatalogManifestAction::Create;
         plan.report.results.push_back(entityResult(
@@ -849,15 +866,6 @@ CatalogManifestImportPlan planCatalogManifestImport(
                 : "duplicate provider mapping in the manifest"));
         continue;
       }
-      if (!entity_actions[entry_index] ||
-          (*entity_actions[entry_index] != CatalogManifestAction::Create &&
-           *entity_actions[entry_index] !=
-               CatalogManifestAction::Unchanged)) {
-        plan.report.results.push_back(mappingResult(
-            entry, mapping, name, CatalogManifestAction::Invalid,
-            "provider mapping target canonical entry is not valid"));
-        continue;
-      }
       const auto existing = resolveMapping(
           plan.resulting_store.catalog(), key);
       if (existing) {
@@ -872,6 +880,15 @@ CatalogManifestImportPlan planCatalogManifestImport(
                   std::string(catalogEntityTypeName(entry.entity_type)) +
                   " " + std::to_string(*existing)));
         }
+        continue;
+      }
+      if (!entity_actions[entry_index] ||
+          (*entity_actions[entry_index] != CatalogManifestAction::Create &&
+           *entity_actions[entry_index] !=
+               CatalogManifestAction::Unchanged)) {
+        plan.report.results.push_back(mappingResult(
+            entry, mapping, name, CatalogManifestAction::Invalid,
+            "provider mapping target canonical entry is not valid"));
         continue;
       }
       try {

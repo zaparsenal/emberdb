@@ -293,23 +293,33 @@ TEST(CatalogManifestTest, DetectsProviderMappingCollisions) {
 }
 
 TEST(CatalogManifestTest, DetectsInvalidParentReferences) {
-  auto manifest = validManifest();
-  manifest.entries[1].competition_id = 999;
-  manifest.entries[5].season_id = 888;
-  manifest.entries[5].home_team_id = 777;
+  auto unknown_season = validManifest();
+  unknown_season.entries[1].competition_id = 999;
+  unknown_season.entries[5].season_id = 888;
 
-  const auto plan = emberdb::planCatalogManifestImport(
-      manifest, emberdb::MatchReviewStore{}, kRecordedAt);
+  const auto season_plan = emberdb::planCatalogManifestImport(
+      unknown_season, emberdb::MatchReviewStore{}, kRecordedAt);
 
-  EXPECT_FALSE(plan.report.importable());
+  EXPECT_FALSE(season_plan.report.importable());
   EXPECT_TRUE(std::ranges::any_of(
-      plan.report.results, [](const auto& result) {
+      season_plan.report.results, [](const auto& result) {
         return result.reason.find("unknown canonical competition 999") !=
                std::string::npos;
       }));
   EXPECT_TRUE(std::ranges::any_of(
-      plan.report.results, [](const auto& result) {
+      season_plan.report.results, [](const auto& result) {
         return result.reason.find("unknown canonical season 888") !=
+               std::string::npos;
+      }));
+
+  auto unknown_team = validManifest();
+  unknown_team.entries[5].home_team_id = 777;
+  const auto team_plan = emberdb::planCatalogManifestImport(
+      unknown_team, emberdb::MatchReviewStore{}, kRecordedAt);
+  EXPECT_FALSE(team_plan.report.importable());
+  EXPECT_TRUE(std::ranges::any_of(
+      team_plan.report.results, [](const auto& result) {
+        return result.reason.find("unknown home team 777") !=
                std::string::npos;
       }));
 }
