@@ -31,6 +31,8 @@ Provider metadata follows a separate path:
 - `include/emberdb/ingestion`, `src/ingestion`: adapter contracts and implementations
 - `include/emberdb/reconciliation`, `src/reconciliation`: explainable cross-provider
   candidate comparison without automatic identity mutation
+- `include/emberdb/persistence`, `src/persistence`: versioned identity and reconciliation
+  review persistence, separate from event-table storage
 - `include/emberdb/storage`, `src/storage`: columnar storage
 - `src/main.cpp`: command-line boundary
 - `tests`: offline unit tests and small fixtures
@@ -84,6 +86,16 @@ Persist and query a normalized fixture database with:
   --input tests/fixtures/complete_events.json --output match.ember
 ./build/emberdb_cli query --database match.ember --filter event_type=Pass \
   --project player_name,minute,start_x,start_y,source_start_x,source_start_y
+```
+
+Generate and review match reconciliation candidates from an existing review store with:
+
+```bash
+./build/emberdb_cli reconcile generate --review match-review.json \
+  --left-provider statsbomb --left-input statsbomb-matches.json \
+  --right-provider wyscout --right-input wyscout-matches.json
+./build/emberdb_cli reconcile list --review match-review.json --status unresolved
+./build/emberdb_cli reconcile inspect --review match-review.json --candidate-id 1
 ```
 
 ## Documentation discipline

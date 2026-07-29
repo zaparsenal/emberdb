@@ -35,6 +35,12 @@ TEST(CanonicalIdentityCatalogTest, MapsMultipleProvidersToCanonicalEntities) {
             emberdb::CanonicalPlayerId{10});
   EXPECT_EQ(catalog.resolveMatch({"StatsBomb", "12345"}),
             emberdb::CanonicalMatchId{100});
+  EXPECT_EQ(catalog.teams().size(), 2U);
+  EXPECT_EQ(catalog.players().size(), 1U);
+  EXPECT_EQ(catalog.matches().size(), 1U);
+  EXPECT_EQ(catalog.teamMappings().size(), 2U);
+  EXPECT_EQ(catalog.playerMappings().size(), 2U);
+  EXPECT_EQ(catalog.matchMappings().size(), 2U);
 }
 
 TEST(CanonicalIdentityCatalogTest, ResolvesEventIdentityWithoutMutatingProviderIds) {

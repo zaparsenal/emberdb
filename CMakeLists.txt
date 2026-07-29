@@ -26,9 +26,11 @@ add_library(emberdb
   src/ingestion/statsbomb_event_adapter.cpp
   src/ingestion/wyscout_metadata_adapter.cpp
   src/ingestion/wyscout_event_adapter.cpp
+  src/persistence/match_review_file.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
   src/reconciliation/match_reconciliation.cpp
+  src/reconciliation/match_review.cpp
   src/storage/football_event_file.cpp
   src/storage/football_event_table.cpp
 )
@@ -70,7 +72,9 @@ if(BUILD_TESTING)
     tests/coordinate_normalization_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
+    tests/match_review_file_test.cpp
     tests/match_reconciliation_test.cpp
+    tests/match_review_test.cpp
     tests/statsbomb_metadata_adapter_test.cpp
     tests/statsbomb_event_adapter_test.cpp
     tests/wyscout_metadata_adapter_test.cpp
@@ -216,5 +220,143 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliPersistenceTest.CleansOutput PROPERTIES
     DEPENDS "EmberDbCliPersistenceTest.QueriesDatabase;EmberDbCliPersistenceTest.AggregatesDatabase"
+  )
+
+  set(EMBERDB_CLI_REJECT_REVIEW
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-reject-review.json")
+  set(EMBERDB_CLI_ACCEPT_REVIEW
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-accept-review.json")
+  set(EMBERDB_REVIEW_FIXTURE
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/match_review_store.json")
+
+  add_test(
+    NAME EmberDbCliReconciliationTest.PreparesRejectReview
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_REJECT_REVIEW}
+      ${EMBERDB_CLI_REJECT_REVIEW}.tmp
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.CopiesRejectReview
+    COMMAND ${CMAKE_COMMAND} -E copy
+      ${EMBERDB_REVIEW_FIXTURE}
+      ${EMBERDB_CLI_REJECT_REVIEW}
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.CopiesRejectReview PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.PreparesRejectReview
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.GeneratesCandidate
+    COMMAND emberdb_cli reconcile generate
+      --review ${EMBERDB_CLI_REJECT_REVIEW}
+      --left-provider statsbomb
+      --left-input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/statsbomb_reconciliation_matches.json
+      --right-provider wyscout
+      --right-input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wyscout_matches.json
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.GeneratesCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.CopiesRejectReview
+    PASS_REGULAR_EXPRESSION "Added 1 new candidate"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.ListsUnresolvedCandidate
+    COMMAND emberdb_cli reconcile list
+      --review ${EMBERDB_CLI_REJECT_REVIEW}
+      --status unresolved
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.ListsUnresolvedCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.GeneratesCandidate
+    PASS_REGULAR_EXPRESSION "1.unresolved.0.85"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.InspectsCandidateEvidence
+    COMMAND emberdb_cli reconcile inspect
+      --review ${EMBERDB_CLI_REJECT_REVIEW}
+      --candidate-id 1
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.InspectsCandidateEvidence PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.ListsUnresolvedCandidate
+    PASS_REGULAR_EXPRESSION "home_team.agreeing.10.1609.1"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.RejectsCandidate
+    COMMAND emberdb_cli reconcile reject
+      --review ${EMBERDB_CLI_REJECT_REVIEW}
+      --candidate-id 1
+      --reason "Provider correction"
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.RejectsCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.InspectsCandidateEvidence
+    PASS_REGULAR_EXPRESSION "Rejected candidate 1: Provider correction"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.ListsRejectedCandidate
+    COMMAND emberdb_cli reconcile list
+      --review ${EMBERDB_CLI_REJECT_REVIEW}
+      --status rejected
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.ListsRejectedCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.RejectsCandidate
+    PASS_REGULAR_EXPRESSION "1.rejected.0.85"
+  )
+
+  add_test(
+    NAME EmberDbCliReconciliationTest.PreparesAcceptReview
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_ACCEPT_REVIEW}
+      ${EMBERDB_CLI_ACCEPT_REVIEW}.tmp
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.CopiesAcceptReview
+    COMMAND ${CMAKE_COMMAND} -E copy
+      ${EMBERDB_REVIEW_FIXTURE}
+      ${EMBERDB_CLI_ACCEPT_REVIEW}
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.CopiesAcceptReview PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.PreparesAcceptReview
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.GeneratesAcceptedCandidate
+    COMMAND emberdb_cli reconcile generate
+      --review ${EMBERDB_CLI_ACCEPT_REVIEW}
+      --left-provider statsbomb
+      --left-input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/statsbomb_reconciliation_matches.json
+      --right-provider wyscout
+      --right-input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wyscout_matches.json
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.GeneratesAcceptedCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.CopiesAcceptReview
+    PASS_REGULAR_EXPRESSION "Candidate IDs: 1"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.AcceptsCandidate
+    COMMAND emberdb_cli reconcile accept
+      --review ${EMBERDB_CLI_ACCEPT_REVIEW}
+      --candidate-id 1
+      --canonical-match-id 100
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.AcceptsCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.GeneratesAcceptedCandidate
+    PASS_REGULAR_EXPRESSION "Accepted candidate 1 as canonical match 100"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.InspectsAcceptedCandidate
+    COMMAND emberdb_cli reconcile inspect
+      --review ${EMBERDB_CLI_ACCEPT_REVIEW}
+      --candidate-id 1
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.InspectsAcceptedCandidate PROPERTIES
+    DEPENDS EmberDbCliReconciliationTest.AcceptsCandidate
+    PASS_REGULAR_EXPRESSION "Canonical match: 100"
+  )
+  add_test(
+    NAME EmberDbCliReconciliationTest.CleansReviews
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_REJECT_REVIEW}
+      ${EMBERDB_CLI_REJECT_REVIEW}.tmp
+      ${EMBERDB_CLI_ACCEPT_REVIEW}
+      ${EMBERDB_CLI_ACCEPT_REVIEW}.tmp
+  )
+  set_tests_properties(EmberDbCliReconciliationTest.CleansReviews PROPERTIES
+    DEPENDS "EmberDbCliReconciliationTest.ListsRejectedCandidate;EmberDbCliReconciliationTest.InspectsAcceptedCandidate"
   )
 endif()

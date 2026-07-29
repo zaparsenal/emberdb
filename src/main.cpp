@@ -14,15 +14,27 @@
 
 #include "emberdb/ingestion/metrica_event_adapter.h"
 #include "emberdb/ingestion/statsbomb_event_adapter.h"
+#include "emberdb/ingestion/statsbomb_metadata_adapter.h"
 #include "emberdb/ingestion/wyscout_event_adapter.h"
+#include "emberdb/ingestion/wyscout_metadata_adapter.h"
+#include "emberdb/persistence/match_review_file.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
+#include "emberdb/reconciliation/match_reconciliation.h"
 #include "emberdb/storage/football_event_file.h"
 #include "emberdb/storage/football_event_table.h"
 
 namespace {
 
-enum class Command { Import, Query };
+enum class Command {
+  Import,
+  Query,
+  ReconcileGenerate,
+  ReconcileList,
+  ReconcileInspect,
+  ReconcileAccept,
+  ReconcileReject
+};
 
 struct Options {
   Command command{Command::Import};
@@ -39,6 +51,17 @@ struct Options {
   std::string group_by;
   std::vector<std::string> aggregates;
   std::optional<emberdb::AttackingDirection> home_first_half_direction;
+  std::filesystem::path review;
+  std::string left_provider;
+  std::filesystem::path left_input;
+  std::string right_provider;
+  std::filesystem::path right_input;
+  std::uint64_t candidate_id{};
+  bool has_candidate_id{};
+  emberdb::Identifier canonical_match_id{};
+  bool has_canonical_match_id{};
+  std::optional<emberdb::MatchCandidateStatus> candidate_status;
+  std::string reason;
 };
 
 void usage(std::ostream& output) {
@@ -49,7 +72,17 @@ void usage(std::ostream& output) {
             "--match-id ID --input PATH) "
             "(--project COLUMN[,COLUMN...] | --aggregate FUNCTION(COLUMN|*)) "
             "[--aggregate FUNCTION(COLUMN|*)]... [--group-by COLUMN[,COLUMN...]] "
-            "[--filter COLUMN=VALUE]...\n";
+            "[--filter COLUMN=VALUE]...\n"
+            "       emberdb_cli reconcile generate --review PATH "
+            "--left-provider PROVIDER --left-input PATH "
+            "--right-provider PROVIDER --right-input PATH\n"
+            "       emberdb_cli reconcile list --review PATH "
+            "[--status unresolved|accepted|rejected]\n"
+            "       emberdb_cli reconcile inspect --review PATH --candidate-id ID\n"
+            "       emberdb_cli reconcile accept --review PATH --candidate-id ID "
+            "--canonical-match-id ID\n"
+            "       emberdb_cli reconcile reject --review PATH --candidate-id ID "
+            "--reason TEXT\n";
 }
 
 template <typename Integer>
@@ -65,18 +98,39 @@ Integer parseInteger(std::string_view text, std::string_view option) {
 
 Options parseOptions(int argc, char** argv) {
   if (argc < 2) {
-    throw std::runtime_error("Expected the 'import' or 'query' command");
+    throw std::runtime_error("Expected the 'import', 'query', or 'reconcile' command");
   }
   Options options;
   const std::string_view command(argv[1]);
+  int first_option = 2;
   if (command == "import") {
     options.command = Command::Import;
   } else if (command == "query") {
     options.command = Command::Query;
+  } else if (command == "reconcile") {
+    if (argc < 3) {
+      throw std::runtime_error("Expected a reconcile action");
+    }
+    const std::string_view action(argv[2]);
+    if (action == "generate") {
+      options.command = Command::ReconcileGenerate;
+    } else if (action == "list") {
+      options.command = Command::ReconcileList;
+    } else if (action == "inspect") {
+      options.command = Command::ReconcileInspect;
+    } else if (action == "accept") {
+      options.command = Command::ReconcileAccept;
+    } else if (action == "reject") {
+      options.command = Command::ReconcileReject;
+    } else {
+      throw std::runtime_error("Unknown reconcile action '" + std::string(action) +
+                               "'");
+    }
+    first_option = 3;
   } else {
-    throw std::runtime_error("Expected the 'import' or 'query' command");
+    throw std::runtime_error("Expected the 'import', 'query', or 'reconcile' command");
   }
-  for (int index = 2; index < argc; ++index) {
+  for (int index = first_option; index < argc; ++index) {
     const std::string_view option(argv[index]);
     if (index + 1 >= argc) {
       throw std::runtime_error("Missing value for " + std::string(option));
@@ -123,9 +177,103 @@ Options parseOptions(int argc, char** argv) {
         throw std::runtime_error(
             "--home-first-half-direction must be left-to-right or right-to-left");
       }
+    } else if (option == "--review") {
+      options.review = value;
+    } else if (option == "--left-provider") {
+      options.left_provider = value;
+    } else if (option == "--left-input") {
+      options.left_input = value;
+    } else if (option == "--right-provider") {
+      options.right_provider = value;
+    } else if (option == "--right-input") {
+      options.right_input = value;
+    } else if (option == "--candidate-id") {
+      options.candidate_id = parseInteger<std::uint64_t>(value, option);
+      options.has_candidate_id = true;
+    } else if (option == "--canonical-match-id") {
+      options.canonical_match_id =
+          parseInteger<emberdb::Identifier>(value, option);
+      options.has_canonical_match_id = true;
+    } else if (option == "--status") {
+      if (value == "unresolved") {
+        options.candidate_status = emberdb::MatchCandidateStatus::Unresolved;
+      } else if (value == "accepted") {
+        options.candidate_status = emberdb::MatchCandidateStatus::Accepted;
+      } else if (value == "rejected") {
+        options.candidate_status = emberdb::MatchCandidateStatus::Rejected;
+      } else {
+        throw std::runtime_error(
+            "--status must be unresolved, accepted, or rejected");
+      }
+    } else if (option == "--reason") {
+      options.reason = value;
     } else {
       throw std::runtime_error("Unknown option '" + std::string(option) + "'");
     }
+  }
+  const bool is_reconciliation =
+      options.command != Command::Import && options.command != Command::Query;
+  if (is_reconciliation) {
+    const bool has_event_option =
+        !options.provider.empty() || options.has_match_id || !options.input.empty() ||
+        !options.output.empty() || !options.database.empty() || options.has_limit ||
+        !options.filters.empty() || !options.projection.empty() ||
+        !options.group_by.empty() || !options.aggregates.empty() ||
+        options.home_first_half_direction.has_value();
+    if (has_event_option) {
+      throw std::runtime_error(
+          "event import and query options are not valid for reconcile commands");
+    }
+    if (options.review.empty()) {
+      throw std::runtime_error("--review is required for reconcile commands");
+    }
+    if (options.command == Command::ReconcileGenerate) {
+      if (options.left_provider.empty() || options.left_input.empty() ||
+          options.right_provider.empty() || options.right_input.empty()) {
+        throw std::runtime_error(
+            "reconcile generate requires both provider and input pairs");
+      }
+    } else if (!options.left_provider.empty() || !options.left_input.empty() ||
+               !options.right_provider.empty() || !options.right_input.empty()) {
+      throw std::runtime_error(
+          "provider and input pairs are only valid for reconcile generate");
+    }
+    if (options.command == Command::ReconcileInspect ||
+        options.command == Command::ReconcileAccept ||
+        options.command == Command::ReconcileReject) {
+      if (!options.has_candidate_id || options.candidate_id == 0) {
+        throw std::runtime_error("a positive --candidate-id is required");
+      }
+    } else if (options.has_candidate_id) {
+      throw std::runtime_error(
+          "--candidate-id is only valid for reconcile inspect, accept, or reject");
+    }
+    if (options.command == Command::ReconcileAccept &&
+        (!options.has_canonical_match_id || options.canonical_match_id <= 0)) {
+      throw std::runtime_error("a positive --canonical-match-id is required");
+    } else if (options.command != Command::ReconcileAccept &&
+               options.has_canonical_match_id) {
+      throw std::runtime_error(
+          "--canonical-match-id is only valid for reconcile accept");
+    }
+    if (options.command == Command::ReconcileReject && options.reason.empty()) {
+      throw std::runtime_error("--reason is required for reconcile reject");
+    } else if (options.command != Command::ReconcileReject &&
+               !options.reason.empty()) {
+      throw std::runtime_error("--reason is only valid for reconcile reject");
+    }
+    if (options.command != Command::ReconcileList && options.candidate_status) {
+      throw std::runtime_error("--status is only valid for reconcile list");
+    }
+    return options;
+  }
+  if (!options.review.empty() || !options.left_provider.empty() ||
+      !options.left_input.empty() || !options.right_provider.empty() ||
+      !options.right_input.empty() || options.has_candidate_id ||
+      options.has_canonical_match_id || options.candidate_status ||
+      !options.reason.empty()) {
+    throw std::runtime_error(
+        "reconciliation options are only valid for reconcile commands");
   }
   const bool has_complete_raw_source =
       !options.provider.empty() && options.has_match_id && !options.input.empty();
@@ -177,6 +325,18 @@ Options parseOptions(int argc, char** argv) {
         "--provider metrica requires --home-first-half-direction");
   }
   return options;
+}
+
+std::vector<emberdb::ProviderMatchMetadata> loadProviderMatches(
+    const std::string& provider, const std::filesystem::path& input) {
+  if (provider == "statsbomb") {
+    return emberdb::StatsBombMetadataAdapter{}.loadMatches(input).matches;
+  }
+  if (provider == "wyscout") {
+    return emberdb::WyscoutMetadataAdapter{}.loadMatches(input).matches;
+  }
+  throw std::runtime_error("Unsupported metadata provider '" + provider +
+                           "'; expected statsbomb or wyscout");
 }
 
 emberdb::FootballEventTable importTable(const Options& options) {
@@ -415,11 +575,121 @@ void printQueryResult(const emberdb::EventQueryResult& result) {
   }
 }
 
+std::string providerMatchText(const emberdb::ProviderMatchReference& reference) {
+  return reference.provider + ":" + reference.id;
+}
+
+std::string_view evidenceStatusText(emberdb::ReconciliationStatus status) {
+  switch (status) {
+    case emberdb::ReconciliationStatus::Missing:
+      return "missing";
+    case emberdb::ReconciliationStatus::Agreeing:
+      return "agreeing";
+    case emberdb::ReconciliationStatus::Conflicting:
+      return "conflicting";
+    case emberdb::ReconciliationStatus::Uncertain:
+      return "uncertain";
+  }
+  return "unknown";
+}
+
+void printCandidateSummary(const emberdb::MatchCandidateRecord& candidate) {
+  std::cout << candidate.id << '\t'
+            << emberdb::matchCandidateStatusName(candidate.status) << '\t'
+            << candidate.reconciliation.confidence << '\t'
+            << providerMatchText(candidate.reconciliation.left_match) << '\t'
+            << providerMatchText(candidate.reconciliation.right_match) << '\n';
+}
+
+void printEvidence(std::string_view name,
+                   const emberdb::MatchFieldEvidence& evidence) {
+  std::cout << name << '\t' << evidenceStatusText(evidence.status) << '\t'
+            << optionalText(evidence.left_value) << '\t'
+            << optionalText(evidence.right_value) << '\t'
+            << optionalText(evidence.canonical_value) << '\n';
+}
+
+void runReconciliationCommand(const Options& options) {
+  auto store = emberdb::loadMatchReviewStore(options.review);
+  if (options.command == Command::ReconcileGenerate) {
+    const auto left =
+        loadProviderMatches(options.left_provider, options.left_input);
+    const auto right =
+        loadProviderMatches(options.right_provider, options.right_input);
+    const auto generated =
+        emberdb::findMatchCandidates(left, right, store.catalog());
+    const auto existing_count = store.candidates().size();
+    const auto ids = store.addCandidates(generated);
+    const auto added_count = store.candidates().size() - existing_count;
+    emberdb::saveMatchReviewStore(store, options.review);
+    std::cout << "Generated " << generated.size() << " qualified "
+              << (generated.size() == 1 ? "comparison" : "comparisons") << '\n'
+              << "Added " << added_count << " new "
+              << (added_count == 1 ? "candidate" : "candidates") << '\n';
+    if (!ids.empty()) {
+      std::cout << "Candidate IDs:";
+      for (const auto id : ids) {
+        std::cout << ' ' << id;
+      }
+      std::cout << '\n';
+    }
+    return;
+  }
+  if (options.command == Command::ReconcileList) {
+    const auto candidates = store.candidates(options.candidate_status);
+    std::cout << "Candidates: " << candidates.size() << '\n'
+              << "id\tstatus\tconfidence\tleft_match\tright_match\n";
+    for (const auto* candidate : candidates) {
+      printCandidateSummary(*candidate);
+    }
+    return;
+  }
+
+  const auto* candidate = store.candidate(options.candidate_id);
+  if (candidate == nullptr) {
+    throw std::runtime_error("Unknown match candidate " +
+                             std::to_string(options.candidate_id));
+  }
+  if (options.command == Command::ReconcileInspect) {
+    printCandidateSummary(*candidate);
+    if (candidate->accepted_match_id) {
+      std::cout << "Canonical match: " << candidate->accepted_match_id->value << '\n';
+    }
+    if (candidate->rejection_reason) {
+      std::cout << "Rejection reason: " << *candidate->rejection_reason << '\n';
+    }
+    std::cout << "field\tstatus\tleft_value\tright_value\tcanonical_value\n";
+    const auto& result = candidate->reconciliation;
+    printEvidence("competition", result.competition);
+    printEvidence("season", result.season);
+    printEvidence("kickoff", result.kickoff);
+    printEvidence("home_team", result.home_team);
+    printEvidence("away_team", result.away_team);
+    printEvidence("score", result.score);
+    return;
+  }
+  if (options.command == Command::ReconcileAccept) {
+    store.accept(options.candidate_id, {options.canonical_match_id});
+    emberdb::saveMatchReviewStore(store, options.review);
+    std::cout << "Accepted candidate " << options.candidate_id
+              << " as canonical match " << options.canonical_match_id << '\n';
+    return;
+  }
+  store.reject(options.candidate_id, options.reason);
+  emberdb::saveMatchReviewStore(store, options.review);
+  std::cout << "Rejected candidate " << options.candidate_id << ": "
+            << options.reason << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     const auto options = parseOptions(argc, argv);
+    if (options.command != Command::Import && options.command != Command::Query) {
+      runReconciliationCommand(options);
+      return 0;
+    }
     const auto table = !options.database.empty()
                            ? emberdb::loadFootballEventTable(options.database)
                            : importTable(options);
