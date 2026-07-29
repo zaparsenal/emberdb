@@ -133,6 +133,42 @@ TEST(CliRendererTest, RendersEntityCandidateEvidenceAndDecision) {
             "Accepted entity candidate 7: player StatsBomb:99 -> 10\n");
 }
 
+TEST(CliRendererTest, RendersCatalogValidationCoverageAndDetails) {
+  emberdb::CatalogValidationReport report;
+  report.entity_type = emberdb::IdentityEntityType::Team;
+  report.summary.provider_records = 2;
+  report.summary.unmapped_exact_matches = 1;
+  report.summary.inactive_exact_matches = 1;
+  report.records = {
+      {emberdb::IdentityEntityType::Team,
+       {"Wyscout", "1609", std::nullopt},
+       "Arsenal",
+       emberdb::CatalogValidationOutcome::ExactMatch,
+       {1},
+       emberdb::ReconciliationStatus::Agreeing,
+       emberdb::CatalogValidationContextStatus::NotApplicable},
+      {emberdb::IdentityEntityType::Team,
+       {"Wyscout", "1631", std::nullopt},
+       "Leicester City",
+       emberdb::CatalogValidationOutcome::InactiveExactMatch,
+       {2},
+       emberdb::ReconciliationStatus::Agreeing,
+       emberdb::CatalogValidationContextStatus::NotApplicable}};
+  std::ostringstream output;
+
+  emberdb::cli::printCatalogValidation(output, report, 19);
+
+  EXPECT_NE(output.str().find("Catalog validation: team"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("Review revision: 19"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("Unmapped exact matches: 1"),
+            std::string::npos);
+  EXPECT_NE(output.str().find(
+                "Wyscout:1631\tLeicester City\tinactive_exact_match\t2"),
+            std::string::npos);
+}
+
 TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   std::ostringstream output;
 
@@ -152,6 +188,8 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   EXPECT_NE(output.str().find("emberdb_cli catalog deprecate"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog merge"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog validate"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog candidates generate"),
             std::string::npos);

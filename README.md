@@ -25,6 +25,9 @@ Implemented milestones include:
   current state or change history;
 - entity candidate CLI commands to stage provider metadata and generate, list, inspect,
   accept, or reject explainable provider-to-canonical comparisons;
+- deterministic, read-only catalog validation reports for offline provider metadata,
+  including mapping coverage, exact-name collisions, lifecycle conflicts, name drift,
+  and season-parent context;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
   candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
@@ -72,6 +75,7 @@ CLI tabular results
 StatsBomb match/lineup JSON ---> StatsBombMetadataAdapter --+
                                                             |
 Wyscout metadata JSON ----------> WyscoutMetadataAdapter ----+--> provider metadata
+                                                            |          +--> read-only catalog validation report
                                                             |          |
 explicit provider ID mappings ------------------------------+          v
                                                     CanonicalIdentityCatalog
@@ -168,6 +172,16 @@ provider mapping through the same audited catalog path used by manual authoring;
 rejection preserves its reason. Conflicting mappings fail without finalizing the
 candidate. Candidate generation itself never creates a mapping. The complete review
 lifecycle is available through `catalog candidates` commands.
+
+`validateCatalogMetadata` uses the same normalized exact-name semantics but produces a
+read-only coverage report instead of candidate records. Each provider record is
+classified independently as mapped to an active or inactive canonical record, an
+unmapped unique or ambiguous exact match, an inactive-only exact match, no exact match,
+or a missing name. Existing mappings remain authoritative, while name drift is reported
+as a separate diagnostic. Season records additionally report whether their provider
+competition mapping is missing, agreeing, conflicting, or inactive. Input records and
+report rows are deduplicated and sorted deterministically; conflicting duplicates are
+rejected rather than silently collapsed.
 
 ## Match reconciliation
 
@@ -479,6 +493,38 @@ history:
 ./build/emberdb_cli catalog history --review match-review.json
 ```
 
+## Catalog validation CLI
+
+Measure how an offline provider metadata export covers an existing catalog without
+creating candidates, mappings, or audit-history entries:
+
+```bash
+./build/emberdb_cli catalog validate \
+  --review match-review.json \
+  --entity team \
+  --provider wyscout \
+  --input wyscout-teams.json
+
+./build/emberdb_cli catalog validate \
+  --review match-review.json \
+  --entity player \
+  --provider statsbomb \
+  --input statsbomb-lineups.json
+```
+
+Validation supports `competition`, `season`, `team`, and `player`. StatsBomb
+competition, season, and team records come from its match export, while players come
+from its lineup export. Wyscout uses the corresponding competition, team, player, or
+match export. Wyscout seasons without names are reported as missing-name records rather
+than guessed from IDs.
+
+The summary separates explicit mapping coverage from exact-name coverage. Detail rows
+show the provider reference, source name, outcome, possible canonical IDs, mapped-name
+agreement, and season-parent context. Exact matching is case-insensitive and collapses
+whitespace; it does not infer aliases or fuzzy matches. Because this command is
+read-only, it does not accept mutation provenance options such as `--actor`, `--source`,
+or `--reason`.
+
 ## Entity candidate review CLI
 
 Entity candidate review compares staged provider metadata with an existing canonical
@@ -729,8 +775,10 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
   automatically join the separately supported player, team, competition, or match
   metadata files.
 - Catalog authoring is intentionally one explicit entity or mapping per command. There
-  is no bulk canonical manifest import, dry-run validation report, reactivation, or
-  automatic alias discovery.
+  is no bulk canonical manifest import, reactivation, or automatic alias discovery.
+- Catalog validation reports one provider metadata export and entity kind per command;
+  they measure exact normalized-name and mapping coverage but do not import a canonical
+  manifest or create candidate decisions.
 - Entity candidates use exact normalized names only. They do not perform fuzzy matching,
   aliases, transliteration, or automatic acceptance, and the open Wyscout match metadata
   cannot generate season candidates without names.
@@ -743,11 +791,12 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is representative offline catalog validation: define
-reusable StatsBomb and Wyscout metadata fixtures, measure exact-match coverage and name
-collisions, and produce a deterministic validation report without mutating the review
-store. Once those results define the real conflict cases, a small canonical-manifest
-importer can add dry-run, atomic validation, and per-change provenance. Event
-reconciliation should remain deferred until these identities have been exercised on
-real provider catalogs. SQL is also deliberately deferred; when resumed, it should
-translate into the existing typed operations rather than bypassing them.
+The recommended next milestone is a small canonical-manifest importer built on the
+validation and audited catalog APIs. It should define a versioned JSON schema, validate
+an entire batch atomically, report duplicate IDs, mapping collisions, parent-reference
+errors, and lifecycle conflicts in a deterministic dry run, and require per-change
+provenance before committing. It should not create fuzzy aliases or automatic identity
+decisions. Event reconciliation should remain deferred until these identities have been
+exercised on representative provider catalogs. SQL is also deliberately deferred; when
+resumed, it should translate into the existing typed operations rather than bypassing
+them.

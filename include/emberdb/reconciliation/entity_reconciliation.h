@@ -39,6 +39,8 @@ struct EntityReconciliation {
     const ProviderMetadata& metadata, IdentityEntityType entity_type,
     const CanonicalIdentityCatalog& catalog, std::string source);
 
+[[nodiscard]] std::string normalizeIdentityName(std::string_view value);
+
 [[nodiscard]] std::string_view identityEntityTypeName(
     IdentityEntityType entity_type) noexcept;
 

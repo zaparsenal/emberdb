@@ -46,6 +46,7 @@ add_library(emberdb
   src/persistence/match_review_file.cpp
   src/query/aggregation_query.cpp
   src/query/event_query.cpp
+  src/reconciliation/catalog_validation.cpp
   src/reconciliation/entity_reconciliation.cpp
   src/reconciliation/match_reconciliation.cpp
   src/reconciliation/match_review.cpp
@@ -97,6 +98,7 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/catalog_validation_test.cpp
     tests/canonical_identity_test.cpp
     tests/cli_command_parser_test.cpp
     tests/cli_renderer_test.cpp
@@ -580,11 +582,44 @@ if(BUILD_TESTING)
     PASS_REGULAR_EXPRESSION "team.2.Leicester City.deprecated.NULL"
   )
   add_test(
+    NAME EmberDbCliCatalogTest.ValidatesTeamCoverage
+    COMMAND emberdb_cli catalog validate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --provider wyscout
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wyscout_teams.json
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ValidatesTeamCoverage PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsDeprecatedTeam
+    PASS_REGULAR_EXPRESSION "Unmapped exact matches: 1"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ReportsInactiveTeamMatch
+    COMMAND emberdb_cli catalog validate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --provider wyscout
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wyscout_teams.json
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ReportsInactiveTeamMatch PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ValidatesTeamCoverage
+    PASS_REGULAR_EXPRESSION "Wyscout:1631.*Leicester City.*inactive_exact_match.*2"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ValidatesMappedPlayerDrift
+    COMMAND emberdb_cli catalog validate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --provider statsbomb
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/statsbomb_lineups.json
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ValidatesMappedPlayerDrift PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ReportsInactiveTeamMatch
+    PASS_REGULAR_EXPRESSION "Mapped name mismatches: 1"
+  )
+  add_test(
     NAME EmberDbCliCatalogTest.ListsHistory
     COMMAND emberdb_cli catalog history --review ${EMBERDB_CLI_CATALOG_REVIEW}
   )
   set_tests_properties(EmberDbCliCatalogTest.ListsHistory PROPERTIES
-    DEPENDS EmberDbCliCatalogTest.ListsDeprecatedTeam
+    DEPENDS EmberDbCliCatalogTest.ValidatesMappedPlayerDrift
     PASS_REGULAR_EXPRESSION "Catalog changes: 16"
   )
   add_test(

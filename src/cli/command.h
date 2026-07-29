@@ -29,6 +29,7 @@ enum class Command {
   CatalogMerge,
   CatalogList,
   CatalogHistory,
+  CatalogValidate,
   EntityCandidateGenerate,
   EntityCandidateList,
   EntityCandidateInspect,

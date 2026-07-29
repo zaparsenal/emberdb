@@ -195,6 +195,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command = Command::CatalogList;
     } else if (action == "history") {
       options.command = Command::CatalogHistory;
+    } else if (action == "validate") {
+      options.command = Command::CatalogValidate;
     } else if (action == "candidates") {
       if (arguments.size() < 4) {
         throw std::runtime_error("Expected a catalog candidates action");
@@ -355,6 +357,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::EntityCandidateInspect ||
       options.command == Command::EntityCandidateAccept ||
       options.command == Command::EntityCandidateReject;
+  const bool is_catalog_validation =
+      options.command == Command::CatalogValidate;
   const bool is_catalog =
       options.command == Command::CatalogInit ||
       options.command == Command::CatalogAdd ||
@@ -363,7 +367,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::CatalogDeprecate ||
       options.command == Command::CatalogMerge ||
       options.command == Command::CatalogList ||
-      options.command == Command::CatalogHistory || is_entity_review;
+      options.command == Command::CatalogHistory ||
+      is_catalog_validation || is_entity_review;
   const bool has_catalog_identity_options =
       options.catalog_entity || options.has_canonical_id ||
       options.has_target_canonical_id ||
@@ -375,6 +380,39 @@ Options parseOptions(std::span<const std::string_view> arguments) {
   if (is_catalog) {
     if (options.review.empty()) {
       throw std::runtime_error("--review is required for catalog commands");
+    }
+    if (is_catalog_validation) {
+      const bool has_unrelated_options =
+          options.has_match_id || !options.output.empty() ||
+          !options.database.empty() || options.has_limit ||
+          !options.filters.empty() || !options.projection.empty() ||
+          !options.group_by.empty() || !options.aggregates.empty() ||
+          options.home_first_half_direction.has_value() ||
+          !options.left_provider.empty() || !options.left_input.empty() ||
+          !options.right_provider.empty() || !options.right_input.empty() ||
+          options.has_candidate_id || options.has_canonical_match_id ||
+          options.candidate_status || options.has_canonical_id ||
+          options.has_target_canonical_id || !options.name.empty() ||
+          options.has_competition_id || !options.competition.empty() ||
+          !options.season.empty() || options.has_home_team_id ||
+          options.has_away_team_id || options.kickoff_seconds ||
+          options.home_score || options.away_score ||
+          !options.provider_id.empty() || options.provider_match_id ||
+          !options.actor.empty() || !options.source.empty() ||
+          !options.reason.empty();
+      if (has_unrelated_options) {
+        throw std::runtime_error(
+            "catalog validate accepts only --review, --entity, --provider, "
+            "and --input");
+      }
+      if (!options.catalog_entity ||
+          *options.catalog_entity == CatalogEntityType::Match ||
+          options.provider.empty() || options.input.empty()) {
+        throw std::runtime_error(
+            "catalog validate requires --entity "
+            "competition|season|team|player, --provider, and --input");
+      }
+      return options;
     }
     if (is_entity_review) {
       const bool has_unrelated_options =

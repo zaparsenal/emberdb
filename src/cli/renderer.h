@@ -11,6 +11,7 @@
 #include "cli/command.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
+#include "emberdb/reconciliation/catalog_validation.h"
 #include "emberdb/reconciliation/match_review.h"
 #include "emberdb/storage/football_event_table.h"
 
@@ -55,6 +56,9 @@ void printCatalogSummary(std::ostream& output,
 void printCatalogHistory(
     std::ostream& output,
     const std::vector<CatalogChangeRecord>& catalog_changes);
+void printCatalogValidation(std::ostream& output,
+                            const CatalogValidationReport& report,
+                            std::uint64_t review_revision);
 void printCatalogMutation(std::ostream& output, std::uint64_t revision,
                           const CatalogChangeRecord* change);
 
