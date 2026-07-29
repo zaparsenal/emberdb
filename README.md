@@ -15,6 +15,10 @@ Implemented milestones include:
   team, player, and match catalogs;
 - deterministic match reconciliation candidates with per-field provenance, status, and
   confidence;
+- a durable review store for canonical catalogs, provider mappings, generated match
+  candidates, evidence, and accepted or rejected decisions;
+- reconciliation CLI commands to generate, list, inspect, accept, and reject match
+  candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
@@ -66,6 +70,10 @@ explicit provider ID mappings ------------------------------+          v
                                                             |
 normalized FootballEvent -----------------------------------+--> canonical event identity
 provider match metadata + canonical team mappings ----------+--> ranked match candidates
+                                                                       |
+                                                                       v
+                                                    versioned match review store
+                                                    (unresolved/accepted/rejected)
 ```
 
 Raw provider files are confined to ingestion adapters. Storage and query execution
@@ -94,10 +102,10 @@ Metrica has no stable team IDs in its standard anonymized CSV. Call
 `Home` and `Away` labels within one match. They are deliberately never global mappings.
 
 `resolveEvent` returns a `CanonicalEventIdentity` alongside an existing normalized
-event; it does not overwrite the event's provider IDs. The catalog and metadata adapters
-are currently programmatic APIs declared under `include/emberdb/identity` and
-`include/emberdb/ingestion`. Catalog persistence, automatic candidate acceptance, and
-CLI mapping commands are planned rather than implied.
+event; it does not overwrite the event's provider IDs. Catalog construction and editing
+remain programmatic APIs declared under `include/emberdb/identity`. A complete catalog,
+including canonical match/team/player records and all provider mappings, can be saved in
+the separate match review file. It is never embedded in an event `.ember` file.
 
 ## Match reconciliation
 
@@ -120,9 +128,16 @@ disqualify a candidate regardless of its numeric score. Resolving both match sid
 one canonical team is also a conflict. `findMatchCandidates` returns only qualified
 candidates, ordered by confidence with deterministic provider-ID tie breaking.
 
-This is candidate generation, not automatic acceptance. EmberDB does not create a
-`CanonicalMatch`, overwrite source values, or add match mappings from a reconciliation
-result.
+Candidate generation never accepts automatically. A reviewer can retain a candidate as
+`unresolved`, reject it with a required reason, or accept it against an existing
+`CanonicalMatch`. Acceptance adds both provider-match-to-canonical-match mappings to the
+catalog. Repeating the identical acceptance or rejection is safe. Attempting to reverse
+a finalized decision, change its canonical match or rejection reason, or conflict with
+an existing provider match mapping fails with a clear error.
+
+Generated confidence and all six per-field evidence records remain fixed in the audit
+record. Regenerating an existing ordered provider pair reuses its candidate ID and does
+not overwrite prior evidence or decisions.
 
 ## Requirements and build
 
@@ -302,7 +317,73 @@ no matching rows returns no rows.
 The programmatic aggregation API is declared in
 `include/emberdb/query/aggregation_query.h`.
 
-## Persistent file format
+## Match reconciliation review CLI
+
+The review CLI operates on an existing versioned review store. Catalog authoring remains
+explicit and programmatic: construct a `CanonicalIdentityCatalog`, pass it to
+`MatchReviewStore`, and call `saveMatchReviewStore` once to create the initial file.
+The APIs are declared in `include/emberdb/reconciliation/match_review.h` and
+`include/emberdb/persistence/match_review_file.h`. This keeps provider identity
+decisions out of command-line heuristics.
+
+Generate qualified candidates from StatsBomb and Wyscout match metadata:
+
+```bash
+./build/emberdb_cli reconcile generate \
+  --review match-review.json \
+  --left-provider statsbomb \
+  --left-input statsbomb-matches.json \
+  --right-provider wyscout \
+  --right-input wyscout-matches.json
+```
+
+Generation uses the canonical team mappings in the review store, assigns stable numeric
+candidate IDs, preserves previously generated records, and atomically saves the updated
+store. The metadata providers currently supported by this command are `statsbomb` and
+`wyscout`.
+
+List all candidates or filter by status:
+
+```bash
+./build/emberdb_cli reconcile list \
+  --review match-review.json \
+  --status unresolved
+```
+
+`--status` accepts `unresolved`, `accepted`, or `rejected`. Omitting it lists every
+candidate.
+
+Inspect confidence and competition, season, kickoff, home-team, away-team, and score
+evidence:
+
+```bash
+./build/emberdb_cli reconcile inspect \
+  --review match-review.json \
+  --candidate-id 1
+```
+
+Accept against an existing canonical match:
+
+```bash
+./build/emberdb_cli reconcile accept \
+  --review match-review.json \
+  --candidate-id 1 \
+  --canonical-match-id 100
+```
+
+Reject with an auditable reason:
+
+```bash
+./build/emberdb_cli reconcile reject \
+  --review match-review.json \
+  --candidate-id 1 \
+  --reason "Provider correction identifies another fixture"
+```
+
+Acceptance and rejection rewrite the review store atomically. Identical repeated
+commands succeed; conflicting finalized decisions fail without changing the file.
+
+## Persistent event file format
 
 Each `.ember` database is one table in one container file. Format version 2 uses a
 fixed little-endian header containing magic bytes, the format version, flags, row count,
@@ -326,6 +407,21 @@ has been written.
 Version 2 adds canonical and source-coordinate columns. Earlier version 1 files are
 rejected rather than guessed or silently migrated; reimport the provider source to create
 a version 2 database.
+
+## Persistent match review format
+
+Match review files are separate UTF-8 JSON documents identified by
+`emberdb-match-review` and format version 1. They store canonical team, player, and match
+catalogs; team, player, and match provider mappings; generated match candidates; numeric
+confidence; complete per-field evidence; decision status; accepted canonical match IDs;
+and rejection reasons.
+
+Loading rebuilds the canonical catalog through its validation APIs and rejects duplicate
+records, dangling mappings, invalid candidate values, contradictory decision fields, or
+accepted candidates whose durable mappings do not agree. Unsupported versions fail
+explicitly. Saving writes a sibling `.tmp` file and renames it only after the complete
+document is written. Existing review files are atomically replaced; a stale temporary
+file causes the save to fail without touching the current review file.
 
 ## Data and coordinate semantics
 
@@ -377,7 +473,7 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 ## Current limitations
 
-- Version 1 files are uncompressed and are loaded fully into memory; there is no metadata
+- Event `.ember` files are uncompressed and are loaded fully into memory; there is no metadata
   pruning, streaming scan, schema migration, or partial-column loader yet.
 - Equality is the only filter operation; there is no ordering, result limiting, SQL,
   optimizer, general expression evaluation, or distinct aggregation yet.
@@ -388,21 +484,21 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - The Wyscout event CLI reads the open 2019 research export only and does not
   automatically join the separately supported player, team, competition, or match
   metadata files.
-- Canonical identity catalogs are in-memory programmatic APIs. They are not stored in
-  `.ember` files, and EmberDB does not automatically decide that two provider entities
-  are the same.
-- Match reconciliation is a programmatic, pairwise candidate generator. There is no
-  persisted review/acceptance workflow, competition mapping catalog, or command-line
-  interface yet.
+- Canonical catalog authoring and provider mapping edits are still programmatic. The
+  reconciliation CLI expects an existing review store and deliberately does not infer
+  team, player, competition, or season identity.
+- Match candidate generation through the CLI currently supports StatsBomb and Wyscout
+  metadata. There is no competition mapping catalog or automatic candidate acceptance.
+- Accepted match mappings do not yet reconcile or rewrite football events.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is a durable review-and-accept workflow for match
-candidates: persist canonical catalogs and explicit accepted mappings, retain rejected
-or unresolved candidates, and never auto-accept conflicts. Event reconciliation should
-remain deferred until those match decisions survive reloads. SQL is also deliberately
-deferred; when resumed, it should translate into the existing typed operations rather
-than bypassing them.
+The recommended next milestone is an explicit catalog-authoring and entity-review
+workflow for provider metadata: import canonical catalog inputs, manage team/player plus
+competition/season mappings, and review those identity decisions with the same durable
+audit discipline. Event reconciliation should remain deferred until those prerequisite
+entities are durable and explainable. SQL is also deliberately deferred; when resumed,
+it should translate into the existing typed operations rather than bypassing them.
