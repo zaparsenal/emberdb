@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -38,6 +39,66 @@ void requireCompatibleMapping(const CanonicalIdentityCatalog& catalog,
 
 MatchReviewStore::MatchReviewStore(CanonicalIdentityCatalog catalog)
     : catalog_(std::move(catalog)) {}
+
+MatchReviewStore MatchReviewStore::restore(
+    CanonicalIdentityCatalog catalog,
+    std::vector<MatchCandidateRecord> candidates) {
+  MatchReviewStore store(std::move(catalog));
+  for (const auto& record : candidates) {
+    if (record.id == 0 || !record.reconciliation.is_candidate) {
+      throw std::invalid_argument("persisted match candidate is invalid");
+    }
+    if (record.reconciliation.left_match.provider.empty() ||
+        record.reconciliation.left_match.id.empty() ||
+        record.reconciliation.right_match.provider.empty() ||
+        record.reconciliation.right_match.id.empty() ||
+        record.reconciliation.left_match == record.reconciliation.right_match ||
+        !std::isfinite(record.reconciliation.confidence) ||
+        record.reconciliation.confidence < 0.0 ||
+        record.reconciliation.confidence > 1.0) {
+      throw std::invalid_argument(
+          "persisted match candidate contains invalid comparison data");
+    }
+    if (store.candidate(record.id) != nullptr ||
+        std::ranges::any_of(store.candidates_, [&record](const auto& existing) {
+          return samePair(existing, record.reconciliation);
+        })) {
+      throw std::invalid_argument("persisted match candidates contain duplicates");
+    }
+    switch (record.status) {
+      case MatchCandidateStatus::Unresolved:
+        if (record.accepted_match_id || record.rejection_reason) {
+          throw std::invalid_argument(
+              "unresolved candidate contains finalized decision data");
+        }
+        break;
+      case MatchCandidateStatus::Accepted:
+        if (!record.accepted_match_id || record.rejection_reason ||
+            store.catalog_.match(*record.accepted_match_id) == nullptr ||
+            store.catalog_.resolveMatch(record.reconciliation.left_match) !=
+                record.accepted_match_id ||
+            store.catalog_.resolveMatch(record.reconciliation.right_match) !=
+                record.accepted_match_id) {
+          throw std::invalid_argument(
+              "accepted candidate does not match its durable catalog mappings");
+        }
+        break;
+      case MatchCandidateStatus::Rejected:
+        if (record.accepted_match_id || !record.rejection_reason ||
+            record.rejection_reason->empty() || blank(*record.rejection_reason)) {
+          throw std::invalid_argument("rejected candidate has invalid decision data");
+        }
+        break;
+    }
+    if (record.id >= std::numeric_limits<std::uint64_t>::max() - 1U) {
+      throw std::invalid_argument("persisted match candidate ID is too large");
+    }
+    store.next_candidate_id_ = std::max(store.next_candidate_id_, record.id + 1U);
+    store.candidates_.push_back(record);
+  }
+  std::ranges::sort(store.candidates_, {}, &MatchCandidateRecord::id);
+  return store;
+}
 
 CanonicalIdentityCatalog& MatchReviewStore::catalog() noexcept { return catalog_; }
 

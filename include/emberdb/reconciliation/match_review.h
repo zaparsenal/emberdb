@@ -24,6 +24,9 @@ class MatchReviewStore {
  public:
   MatchReviewStore() = default;
   explicit MatchReviewStore(CanonicalIdentityCatalog catalog);
+  [[nodiscard]] static MatchReviewStore restore(
+      CanonicalIdentityCatalog catalog,
+      std::vector<MatchCandidateRecord> candidates);
 
   [[nodiscard]] CanonicalIdentityCatalog& catalog() noexcept;
   [[nodiscard]] const CanonicalIdentityCatalog& catalog() const noexcept;

@@ -125,4 +125,23 @@ TEST(MatchReviewStoreTest, RejectsBlankReasonsAndDisqualifiedComparisons) {
                std::invalid_argument);
 }
 
+TEST(MatchReviewStoreTest, RejectsInvalidPersistedCandidateSnapshots) {
+  auto store = reviewStore();
+  auto reconciliation = candidate(store);
+  reconciliation.confidence = 2.0;
+  emberdb::MatchCandidateRecord record{1, reconciliation,
+                                       emberdb::MatchCandidateStatus::Unresolved,
+                                       std::nullopt, std::nullopt};
+  EXPECT_THROW(static_cast<void>(emberdb::MatchReviewStore::restore(
+                   store.catalog(), {record})),
+               std::invalid_argument);
+
+  reconciliation.confidence = 1.0;
+  record = {1, reconciliation, emberdb::MatchCandidateStatus::Accepted,
+            emberdb::CanonicalMatchId{100}, std::nullopt};
+  EXPECT_THROW(static_cast<void>(emberdb::MatchReviewStore::restore(
+                   store.catalog(), {record})),
+               std::invalid_argument);
+}
+
 }  // namespace
