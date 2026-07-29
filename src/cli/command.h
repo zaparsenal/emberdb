@@ -22,6 +22,7 @@ enum class Command {
   ReconcileAccept,
   ReconcileReject,
   CatalogInit,
+  CatalogImport,
   CatalogAdd,
   CatalogMap,
   CatalogRename,
@@ -53,6 +54,9 @@ struct Options {
   std::vector<std::string> aggregates;
   std::optional<AttackingDirection> home_first_half_direction;
   std::filesystem::path review;
+  std::filesystem::path manifest;
+  std::filesystem::path store;
+  bool dry_run{};
   std::string left_provider;
   std::filesystem::path left_input;
   std::string right_provider;

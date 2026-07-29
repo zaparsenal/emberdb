@@ -11,6 +11,7 @@
 
 #include "cli/command_parser.h"
 #include "cli/renderer.h"
+#include "emberdb/identity/catalog_manifest.h"
 #include "emberdb/ingestion/event_provider_adapter.h"
 #include "emberdb/ingestion/metrica_event_adapter.h"
 #include "emberdb/ingestion/provider_metadata.h"
@@ -121,6 +122,7 @@ bool isEntityCandidateCommand(Command command) {
 
 bool isCatalogCommand(Command command) {
   return command == Command::CatalogInit ||
+         command == Command::CatalogImport ||
          command == Command::CatalogAdd ||
          command == Command::CatalogMap ||
          command == Command::CatalogRename ||
@@ -189,6 +191,41 @@ void runEntityCandidateCommand(const Options& options,
 void runCatalogCommand(const Options& options, std::ostream& output) {
   if (isEntityCandidateCommand(options.command)) {
     runEntityCandidateCommand(options, output);
+    return;
+  }
+  if (options.command == Command::CatalogImport) {
+    std::error_code error;
+    const bool store_exists = std::filesystem::exists(options.store, error);
+    if (error) {
+      throw std::runtime_error("Unable to inspect catalog store '" +
+                               options.store.string() + "': " +
+                               error.message());
+    }
+    const auto current_store =
+        store_exists ? loadMatchReviewStore(options.store)
+                     : MatchReviewStore{};
+    const auto manifest = loadCatalogManifest(options.manifest);
+    auto plan = planCatalogManifestImport(
+        manifest, current_store,
+        std::chrono::time_point_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now()));
+    if (!plan.report.importable()) {
+      printCatalogManifestReport(output, plan.report, options.dry_run,
+                                 false);
+      throw std::runtime_error(
+          "catalog manifest batch rejected; no changes applied");
+    }
+    if (options.dry_run) {
+      printCatalogManifestReport(output, plan.report, true, false);
+      return;
+    }
+    if (!store_exists) {
+      createMatchReviewStore(plan.resulting_store, options.store);
+    } else if (plan.report.hasChanges()) {
+      saveMatchReviewStore(plan.resulting_store, options.store,
+                           current_store.revision());
+    }
+    printCatalogManifestReport(output, plan.report, false, true);
     return;
   }
   if (options.command == Command::CatalogInit) {

@@ -157,6 +157,49 @@ TEST(CliCommandParserTest, ParsesAuditedCatalogAddAndMapOptions) {
   EXPECT_EQ(map.provider_match_id, "42");
 }
 
+TEST(CliCommandParserTest, ParsesCatalogManifestImportOptions) {
+  constexpr std::array arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"import"},
+      std::string_view{"--manifest"},
+      std::string_view{"catalog.json"},
+      std::string_view{"--store"},
+      std::string_view{"identities.ember-catalog"},
+      std::string_view{"--dry-run"}};
+
+  const auto options = emberdb::cli::parseOptions(arguments);
+
+  EXPECT_EQ(options.command, emberdb::cli::Command::CatalogImport);
+  EXPECT_EQ(options.manifest, "catalog.json");
+  EXPECT_EQ(options.store, "identities.ember-catalog");
+  EXPECT_TRUE(options.dry_run);
+
+  constexpr std::array missing_store{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"import"},
+      std::string_view{"--manifest"},
+      std::string_view{"catalog.json"}};
+  EXPECT_THROW(
+      static_cast<void>(emberdb::cli::parseOptions(missing_store)),
+      std::runtime_error);
+
+  constexpr std::array unrelated_review{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"import"},
+      std::string_view{"--manifest"},
+      std::string_view{"catalog.json"},
+      std::string_view{"--store"},
+      std::string_view{"identities.ember-catalog"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"}};
+  EXPECT_THROW(
+      static_cast<void>(emberdb::cli::parseOptions(unrelated_review)),
+      std::runtime_error);
+}
+
 TEST(CliCommandParserTest, ParsesEntityCandidateLifecycleOptions) {
   constexpr std::array generate_arguments{
       std::string_view{"emberdb_cli"},

@@ -23,6 +23,9 @@ Implemented milestones include:
 - audited catalog CLI commands to initialize a review store, add canonical entities,
   map provider identities, rename, deprecate, and merge canonical entities, and inspect
   current state or change history;
+- a strict versioned JSON canonical-manifest importer with deterministic IDs,
+  per-operation provenance, reviewable dry runs, complete-batch validation,
+  idempotent re-import, and atomic store replacement;
 - entity candidate CLI commands to stage provider metadata and generate, list, inspect,
   accept, or reject explainable provider-to-canonical comparisons;
 - deterministic, read-only catalog validation reports for offline provider metadata,
@@ -79,6 +82,9 @@ Wyscout metadata JSON ----------> WyscoutMetadataAdapter ----+--> provider metad
                                                             |          |
 explicit provider ID mappings ------------------------------+          v
                                                     CanonicalIdentityCatalog
+                                                            |
+versioned canonical manifest --> validated import plan ------+
+                                (dry-run or atomic apply)     |
                                                             |
 normalized FootballEvent -----------------------------------+--> canonical event identity
 provider match metadata + canonical team mappings ----------+--> ranked match candidates
@@ -147,6 +153,12 @@ event; it does not overwrite the event's provider IDs. Audited catalog construct
 mapping APIs live on `MatchReviewStore`; each mutation records actor, source, reason,
 timestamp, and revision. A complete catalog and its audit records can be saved in the
 separate match review file. It is never embedded in an event `.ember` file.
+
+`catalog import` is a separate identity-authoring path under `identity`; it is not a
+provider ingestion adapter and does not participate in reconciliation scoring. The
+import planner copies an existing `MatchReviewStore` and calls its audited add/map APIs.
+If any canonical entry or mapping is invalid or conflicted, the tentative copy is
+discarded.
 
 ## Entity reconciliation
 
@@ -249,7 +261,8 @@ sanitizers enabled.
 ctest --test-dir build --output-on-failure
 ```
 
-Tests use only files under `tests/fixtures` and do not access the internet. The first CMake configuration may download build dependencies.
+Tests use only repository fixtures and examples and do not access the internet. The
+first CMake configuration may download build dependencies.
 
 ## CLI usage
 
@@ -416,6 +429,82 @@ Create an empty review store:
 ./build/emberdb_cli catalog init --review match-review.json
 ```
 
+### Canonical manifest import
+
+For a reviewable batch, use the version 1 JSON example at
+`examples/catalog-manifest.json`. Dry-run can target either an existing review store or
+a path that does not exist yet:
+
+```bash
+./build/emberdb_cli catalog import \
+  --manifest examples/catalog-manifest.json \
+  --store identities.ember-catalog \
+  --dry-run
+```
+
+Dry-run reads and validates the entire manifest, plans against a copy of the current
+store, and prints stable results without creating a lock, temporary file, store, catalog
+entry, mapping, audit record, or revision. The summary counts individual canonical
+additions and provider mappings, so one canonical entry with one mapping contributes two
+operations. Results are sorted by entity type, canonical ID, and provider reference and
+are classified as `create`, `unchanged`, `conflict`, or `invalid`.
+
+Apply the same reviewed batch by omitting `--dry-run`:
+
+```bash
+./build/emberdb_cli catalog import \
+  --manifest examples/catalog-manifest.json \
+  --store identities.ember-catalog
+```
+
+An absent store is created only after validation succeeds. An existing store is locked,
+revision checked, written completely to a sibling `.tmp`, and atomically replaced.
+Invalid or conflicted plans are reset to the loaded store and never passed to
+persistence. Re-importing identical canonical metadata and mappings reports every
+operation as unchanged, writes nothing, and does not consume a revision.
+
+The v1 document has this top-level shape:
+
+```json
+{
+  "format": "emberdb-canonical-manifest",
+  "version": 1,
+  "competitions": [],
+  "seasons": [],
+  "teams": [],
+  "players": [],
+  "matches": []
+}
+```
+
+The entity arrays are optional and manifest order does not control dependency
+resolution. Every entity uses a positive numeric `id` and a
+`provenance` object containing nonblank `author`, `source`, and `reason`. Competition,
+team, and player entries add `name`. Season entries add `competition_id` and `name`.
+Match entries add `season_id`, `home_team_id`, and `away_team_id`;
+`kickoff_seconds` is optional and `home_score`/`away_score` must be both present or both
+absent.
+
+Any entity can contain a `mappings` array. Each mapping requires `provider`,
+`provider_id`, and its own complete provenance. Team and player mappings may also use
+`provider_match_id` for match-local provider identities. Match mappings are supported
+by the manifest and are recorded through the same audited mapping layer as all other
+entity types.
+
+The importer rejects unknown fields, malformed types, blank values, missing provenance,
+unsupported versions, duplicate typed canonical IDs, duplicate mappings, and one
+provider identity assigned to multiple canonical entities. It also rejects collisions
+with existing mappings; metadata changes for an existing canonical ID; inactive
+targets; unknown or inactive season competitions; unknown match seasons or sides;
+equal home and away teams; and invalid score pairs. The schema forms a fixed acyclic
+graph (`competition <- season <- match`, with match-to-team edges), so cyclic parent
+relationships cannot be expressed. References may point to entries later in the file
+because the complete manifest is validated before application.
+
+The current canonical player model does not store club membership, so v1 player entries
+do not accept a team reference. Provider roster/team context remains metadata evidence
+for candidate review rather than durable canonical player metadata.
+
 Add canonical entities one at a time. Every mutation requires an actor, evidence source,
 and reason; EmberDB records those values with the current UTC timestamp and resulting
 store revision.
@@ -459,7 +548,9 @@ Map provider identities only after the canonical target exists:
 ```
 
 `--provider-match-id` is allowed only for match-local team or player references.
-Provider match mappings remain owned by accepted reconciliation decisions.
+The one-at-a-time `catalog map` command does not author match mappings; accepted
+reconciliation decisions and validated manifests can create them through the audited
+store API.
 Repeating an identical mapping is a no-op and does not consume a revision.
 
 Maintain existing competition, season, team, or player records with audited commands:

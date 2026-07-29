@@ -82,16 +82,26 @@ TEST(MatchReviewStoreTest, AuditsCatalogAuthoringAndMappingRevisions) {
                 provenance("Map provider team"));
   store.mapPlayer({"Metrica", "Player1", "42"}, {10},
                   provenance("Map match-local player"));
+  store.addTeam({{2}, "South FC"}, provenance("Create away team"));
+  store.addMatch({{100}, "Premier League", "2023/2024", std::nullopt,
+                  {1}, {2}, std::nullopt, std::nullopt},
+                 provenance("Create match"));
+  store.mapMatch({"StatsBomb", "12345"}, {100},
+                 provenance("Map provider match"));
   const auto revision = store.revision();
   store.mapPlayer({"Metrica", "Player1", "42"}, {10},
                   provenance("Repeat mapping"));
+  store.mapMatch({"StatsBomb", "12345"}, {100},
+                 provenance("Repeat match mapping"));
 
-  EXPECT_EQ(revision, 8U);
+  EXPECT_EQ(revision, 11U);
   EXPECT_EQ(store.revision(), revision);
-  ASSERT_EQ(store.catalogChanges().size(), 8U);
+  ASSERT_EQ(store.catalogChanges().size(), 11U);
   EXPECT_EQ(store.catalogChanges().front().entity_type,
             emberdb::CatalogEntityType::Competition);
-  EXPECT_EQ(store.catalogChanges().back().provider_match_id, "42");
+  EXPECT_EQ(store.catalogChanges().back().entity_type,
+            emberdb::CatalogEntityType::Match);
+  EXPECT_EQ(store.catalogChanges().back().provider_id, "12345");
   EXPECT_EQ(store.catalogChanges().back().provenance.actor, "reviewer");
 }
 

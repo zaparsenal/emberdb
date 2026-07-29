@@ -87,6 +87,9 @@ class MatchReviewStore {
   void mapPlayer(ProviderPlayerReference provider_player,
                  CanonicalPlayerId canonical_player,
                  ReviewProvenance provenance);
+  void mapMatch(ProviderMatchReference provider_match,
+                CanonicalMatchId canonical_match,
+                ReviewProvenance provenance);
   void renameCatalogEntity(CatalogEntityType entity_type,
                            Identifier canonical_id, std::string name,
                            ReviewProvenance provenance);

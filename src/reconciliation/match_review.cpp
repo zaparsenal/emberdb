@@ -279,7 +279,11 @@ bool catalogMappingMatches(const CanonicalIdentityCatalog& catalog,
       }
       break;
     case CatalogEntityType::Match:
-      return false;
+      if (const auto id =
+              catalog.resolveMatch({*change.provider, *change.provider_id})) {
+        mapped = id->value;
+      }
+      break;
   }
   return mapped &&
          canonicalIdsAgree(catalog, change.entity_type, change.canonical_id,
@@ -635,6 +639,25 @@ void MatchReviewStore::mapPlayer(ProviderPlayerReference provider_player,
       canonical_player.value, catalog_.player(canonical_player)->name,
       std::move(provider), std::move(provider_id),
       std::move(provider_match_id), std::move(provenance));
+}
+
+void MatchReviewStore::mapMatch(ProviderMatchReference provider_match,
+                                CanonicalMatchId canonical_match,
+                                ReviewProvenance provenance) {
+  if (catalog_.resolveMatch(provider_match) == canonical_match) {
+    return;
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto provider = provider_match.provider;
+  const auto provider_id = provider_match.id;
+  catalog_.mapMatch(std::move(provider_match), canonical_match);
+  const auto* match = catalog_.match(canonical_match);
+  recordCatalogChange(
+      CatalogChangeAction::Map, CatalogEntityType::Match,
+      canonical_match.value, match->competition + " " + match->season,
+      std::move(provider), std::move(provider_id), std::nullopt,
+      std::move(provenance));
 }
 
 void MatchReviewStore::renameCatalogEntity(
