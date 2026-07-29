@@ -409,12 +409,98 @@ if(BUILD_TESTING)
     DEPENDS EmberDbCliCatalogTest.MapsTeam
   )
   add_test(
+    NAME EmberDbCliCatalogTest.GeneratesPlayerCandidate
+    COMMAND emberdb_cli catalog candidates generate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player
+      --provider statsbomb
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/statsbomb_lineups.json
+  )
+  set_tests_properties(EmberDbCliCatalogTest.GeneratesPlayerCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsMatchLocalPlayer
+    PASS_REGULAR_EXPRESSION "Added 1 new entity candidate"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsUnresolvedPlayerCandidate
+    COMMAND emberdb_cli catalog candidates list
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player
+      --status unresolved
+  )
+  set_tests_properties(
+    EmberDbCliCatalogTest.ListsUnresolvedPlayerCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.GeneratesPlayerCandidate
+    PASS_REGULAR_EXPRESSION "1.unresolved.player.1.StatsBomb:99.10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.InspectsPlayerCandidate
+    COMMAND emberdb_cli catalog candidates inspect
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --candidate-id 1
+  )
+  set_tests_properties(EmberDbCliCatalogTest.InspectsPlayerCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsUnresolvedPlayerCandidate
+    PASS_REGULAR_EXPRESSION "name.agreeing.Alex Forward.Alex Forward"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.AcceptsPlayerCandidate
+    COMMAND emberdb_cli catalog candidates accept
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --candidate-id 1
+      --actor "CTest reviewer"
+      --source "offline fixtures"
+      --reason "Verified player identity"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AcceptsPlayerCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.InspectsPlayerCandidate
+    PASS_REGULAR_EXPRESSION
+      "Accepted entity candidate 1: player StatsBomb:99 -> 10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.GeneratesTeamCandidate
+    COMMAND emberdb_cli catalog candidates generate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team
+      --provider statsbomb
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/statsbomb_reconciliation_matches.json
+  )
+  set_tests_properties(EmberDbCliCatalogTest.GeneratesTeamCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AcceptsPlayerCandidate
+    PASS_REGULAR_EXPRESSION "Entity candidate IDs: 2"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.RejectsTeamCandidate
+    COMMAND emberdb_cli catalog candidates reject
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --candidate-id 2
+      --actor "CTest reviewer"
+      --source "offline fixtures"
+      --reason "Provider team requires manual review"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.RejectsTeamCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.GeneratesTeamCandidate
+    PASS_REGULAR_EXPRESSION
+      "Rejected entity candidate 2: Provider team requires manual review"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsRejectedTeamCandidate
+    COMMAND emberdb_cli catalog candidates list
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team
+      --status rejected
+  )
+  set_tests_properties(
+    EmberDbCliCatalogTest.ListsRejectedTeamCandidate PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.RejectsTeamCandidate
+    PASS_REGULAR_EXPRESSION "2.rejected.team.1.StatsBomb:20.2"
+  )
+  add_test(
     NAME EmberDbCliCatalogTest.ListsCatalog
     COMMAND emberdb_cli catalog list --review ${EMBERDB_CLI_CATALOG_REVIEW}
   )
   set_tests_properties(EmberDbCliCatalogTest.ListsCatalog PROPERTIES
-    DEPENDS EmberDbCliCatalogTest.MapsMatchLocalPlayer
-    PASS_REGULAR_EXPRESSION "player.Metrica:Player1@42.10"
+    DEPENDS EmberDbCliCatalogTest.ListsRejectedTeamCandidate
+    PASS_REGULAR_EXPRESSION "player.StatsBomb:99.10"
   )
   add_test(
     NAME EmberDbCliCatalogTest.ListsHistory
@@ -422,7 +508,7 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliCatalogTest.ListsHistory PROPERTIES
     DEPENDS EmberDbCliCatalogTest.ListsCatalog
-    PASS_REGULAR_EXPRESSION "Catalog changes: 10"
+    PASS_REGULAR_EXPRESSION "Catalog changes: 11"
   )
   add_test(
     NAME EmberDbCliCatalogTest.CleansReview

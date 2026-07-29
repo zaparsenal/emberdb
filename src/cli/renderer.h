@@ -35,6 +35,19 @@ void printCandidateAccepted(std::ostream& output, std::uint64_t candidate_id,
                             Identifier canonical_match_id);
 void printCandidateRejected(std::ostream& output, std::uint64_t candidate_id,
                             const std::string& reason);
+void printEntityCandidateGeneration(
+    std::ostream& output, std::size_t generated_count,
+    std::size_t added_count, const std::vector<std::uint64_t>& ids);
+void printEntityCandidateList(
+    std::ostream& output,
+    const std::vector<const EntityCandidateRecord*>& candidates);
+void printEntityCandidateInspection(
+    std::ostream& output, const EntityCandidateRecord& candidate);
+void printEntityCandidateAccepted(
+    std::ostream& output, const EntityCandidateRecord& candidate);
+void printEntityCandidateRejected(std::ostream& output,
+                                  std::uint64_t candidate_id,
+                                  const std::string& reason);
 void printCatalogCreated(std::ostream& output,
                          const std::filesystem::path& path);
 void printCatalogSummary(std::ostream& output,

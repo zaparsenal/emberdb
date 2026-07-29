@@ -157,6 +157,70 @@ TEST(CliCommandParserTest, ParsesAuditedCatalogAddAndMapOptions) {
   EXPECT_EQ(map.provider_match_id, "42");
 }
 
+TEST(CliCommandParserTest, ParsesEntityCandidateLifecycleOptions) {
+  constexpr std::array generate_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"candidates"},
+      std::string_view{"generate"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"player"},
+      std::string_view{"--provider"},
+      std::string_view{"statsbomb"},
+      std::string_view{"--input"},
+      std::string_view{"lineups.json"}};
+  const auto generate = emberdb::cli::parseOptions(generate_arguments);
+
+  EXPECT_EQ(generate.command,
+            emberdb::cli::Command::EntityCandidateGenerate);
+  EXPECT_EQ(generate.catalog_entity, emberdb::CatalogEntityType::Player);
+  EXPECT_EQ(generate.provider, "statsbomb");
+  EXPECT_EQ(generate.input, "lineups.json");
+
+  constexpr std::array list_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"candidates"},
+      std::string_view{"list"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"team"},
+      std::string_view{"--status"},
+      std::string_view{"unresolved"}};
+  const auto list = emberdb::cli::parseOptions(list_arguments);
+
+  EXPECT_EQ(list.command, emberdb::cli::Command::EntityCandidateList);
+  EXPECT_EQ(list.catalog_entity, emberdb::CatalogEntityType::Team);
+  EXPECT_EQ(list.candidate_status,
+            emberdb::MatchCandidateStatus::Unresolved);
+
+  constexpr std::array accept_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"candidates"},
+      std::string_view{"accept"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--candidate-id"},
+      std::string_view{"7"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"provider profile"},
+      std::string_view{"--reason"},
+      std::string_view{"Verified identity"}};
+  const auto accept = emberdb::cli::parseOptions(accept_arguments);
+
+  EXPECT_EQ(accept.command, emberdb::cli::Command::EntityCandidateAccept);
+  EXPECT_EQ(accept.candidate_id, 7U);
+  EXPECT_EQ(accept.actor, "reviewer");
+  EXPECT_EQ(accept.source, "provider profile");
+  EXPECT_EQ(accept.reason, "Verified identity");
+}
+
 TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
   constexpr std::array mixed_sources{
       std::string_view{"emberdb_cli"},
@@ -208,6 +272,24 @@ TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
       std::string_view{"Mapping"}};
   EXPECT_THROW(
       static_cast<void>(emberdb::cli::parseOptions(invalid_catalog_scope)),
+      std::runtime_error);
+
+  constexpr std::array invalid_entity_candidate{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"candidates"},
+      std::string_view{"generate"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"match"},
+      std::string_view{"--provider"},
+      std::string_view{"statsbomb"},
+      std::string_view{"--input"},
+      std::string_view{"matches.json"}};
+  EXPECT_THROW(
+      static_cast<void>(
+          emberdb::cli::parseOptions(invalid_entity_candidate)),
       std::runtime_error);
 }
 

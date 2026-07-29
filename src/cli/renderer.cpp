@@ -116,6 +116,30 @@ void printEvidence(std::ostream& output, std::string_view name,
          << optionalText(evidence.canonical_value) << '\n';
 }
 
+std::string providerIdentityText(
+    const ProviderIdentityReference& reference) {
+  return providerReferenceText(reference.provider, reference.id,
+                               reference.match_id);
+}
+
+void printEntityCandidateSummary(
+    std::ostream& output, const EntityCandidateRecord& candidate) {
+  const auto& result = candidate.reconciliation;
+  output << candidate.id << '\t'
+         << matchCandidateStatusName(candidate.status) << '\t'
+         << identityEntityTypeName(result.entity_type) << '\t'
+         << result.confidence << '\t'
+         << providerIdentityText(result.provider_identity) << '\t'
+         << result.canonical_id << '\n';
+}
+
+void printEntityEvidence(std::ostream& output, std::string_view name,
+                         const EntityFieldEvidence& evidence) {
+  output << name << '\t' << evidenceStatusText(evidence.status) << '\t'
+         << optionalText(evidence.provider_value) << '\t'
+         << optionalText(evidence.canonical_value) << '\n';
+}
+
 }  // namespace
 
 void printUsage(std::ostream& output) {
@@ -146,7 +170,19 @@ void printUsage(std::ostream& output) {
             "[--provider-match-id ID] "
             "--actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli catalog list --review PATH\n"
-            "       emberdb_cli catalog history --review PATH\n";
+            "       emberdb_cli catalog history --review PATH\n"
+            "       emberdb_cli catalog candidates generate --review PATH "
+            "--entity competition|season|team|player "
+            "--provider PROVIDER --input PATH\n"
+            "       emberdb_cli catalog candidates list --review PATH "
+            "[--entity competition|season|team|player] "
+            "[--status unresolved|accepted|rejected]\n"
+            "       emberdb_cli catalog candidates inspect --review PATH "
+            "--candidate-id ID\n"
+            "       emberdb_cli catalog candidates accept --review PATH "
+            "--candidate-id ID --actor TEXT --source TEXT --reason TEXT\n"
+            "       emberdb_cli catalog candidates reject --review PATH "
+            "--candidate-id ID --actor TEXT --source TEXT --reason TEXT\n";
 }
 
 void printImportResult(std::ostream& output, const FootballEventTable& table,
@@ -275,6 +311,71 @@ void printCandidateAccepted(std::ostream& output, std::uint64_t candidate_id,
 void printCandidateRejected(std::ostream& output, std::uint64_t candidate_id,
                             const std::string& reason) {
   output << "Rejected candidate " << candidate_id << ": " << reason << '\n';
+}
+
+void printEntityCandidateGeneration(
+    std::ostream& output, std::size_t generated_count,
+    std::size_t added_count, const std::vector<std::uint64_t>& ids) {
+  output << "Generated " << generated_count << " qualified entity "
+         << (generated_count == 1 ? "comparison" : "comparisons") << '\n'
+         << "Added " << added_count << " new entity "
+         << (added_count == 1 ? "candidate" : "candidates") << '\n';
+  if (!ids.empty()) {
+    output << "Entity candidate IDs:";
+    for (const auto id : ids) {
+      output << ' ' << id;
+    }
+    output << '\n';
+  }
+}
+
+void printEntityCandidateList(
+    std::ostream& output,
+    const std::vector<const EntityCandidateRecord*>& candidates) {
+  output << "Entity candidates: " << candidates.size() << '\n'
+         << "id\tstatus\tentity\tconfidence\tprovider\tcanonical_id\n";
+  for (const auto* candidate : candidates) {
+    printEntityCandidateSummary(output, *candidate);
+  }
+}
+
+void printEntityCandidateInspection(
+    std::ostream& output, const EntityCandidateRecord& candidate) {
+  output << "id\tstatus\tentity\tconfidence\tprovider\tcanonical_id\n";
+  printEntityCandidateSummary(output, candidate);
+  output << "Source: " << candidate.reconciliation.source << '\n';
+  if (candidate.rejection_reason) {
+    output << "Rejection reason: " << *candidate.rejection_reason << '\n';
+  }
+  if (candidate.decision_provenance) {
+    output << "Decision actor: " << candidate.decision_provenance->actor << '\n'
+           << "Decision source: " << candidate.decision_provenance->source
+           << '\n'
+           << "Decision reason: " << candidate.decision_provenance->reason
+           << '\n'
+           << "Decision recorded at: "
+           << candidate.decision_provenance->recorded_at.time_since_epoch().count()
+           << '\n';
+  }
+  output << "field\tstatus\tprovider_value\tcanonical_value\n";
+  printEntityEvidence(output, "name", candidate.reconciliation.name);
+  printEntityEvidence(output, "context", candidate.reconciliation.context);
+}
+
+void printEntityCandidateAccepted(
+    std::ostream& output, const EntityCandidateRecord& candidate) {
+  const auto& result = candidate.reconciliation;
+  output << "Accepted entity candidate " << candidate.id << ": "
+         << identityEntityTypeName(result.entity_type) << ' '
+         << providerIdentityText(result.provider_identity) << " -> "
+         << result.canonical_id << '\n';
+}
+
+void printEntityCandidateRejected(std::ostream& output,
+                                  std::uint64_t candidate_id,
+                                  const std::string& reason) {
+  output << "Rejected entity candidate " << candidate_id << ": " << reason
+         << '\n';
 }
 
 void printCatalogCreated(std::ostream& output,

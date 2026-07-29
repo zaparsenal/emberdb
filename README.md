@@ -22,6 +22,8 @@ Implemented milestones include:
   candidates, evidence, and accepted or rejected decisions;
 - audited catalog CLI commands to initialize a review store, add canonical entities,
   map provider identities, and inspect current state or change history;
+- entity candidate CLI commands to stage provider metadata and generate, list, inspect,
+  accept, or reject explainable provider-to-canonical comparisons;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
   candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
@@ -146,8 +148,8 @@ The programmatic APIs are declared in
 idempotent and preserves the first evidence snapshot. Acceptance creates the typed
 provider mapping through the same audited catalog path used by manual authoring;
 rejection preserves its reason. Conflicting mappings fail without finalizing the
-candidate. Candidate generation itself never creates a mapping. CLI commands are the
-next slice.
+candidate. Candidate generation itself never creates a mapping. The complete review
+lifecycle is available through `catalog candidates` commands.
 
 ## Match reconciliation
 
@@ -436,6 +438,72 @@ history:
 ./build/emberdb_cli catalog history --review match-review.json
 ```
 
+## Entity candidate review CLI
+
+Entity candidate review compares staged provider metadata with an existing canonical
+catalog. Generation is deliberately conservative: it emits only
+case-insensitive, whitespace-normalized exact-name matches and never creates a mapping.
+
+Generate player candidates from a StatsBomb lineup file:
+
+```bash
+./build/emberdb_cli catalog candidates generate \
+  --review match-review.json \
+  --entity player \
+  --provider statsbomb \
+  --input statsbomb-lineups.json
+```
+
+The input kind depends on the entity and provider. StatsBomb competition, season, and
+team metadata come from its match export; players come from its lineup export. Wyscout
+uses its separate competition, team, and player exports. The open Wyscout match export
+currently provides season IDs but not season names, so it cannot produce exact-name
+season candidates.
+
+List all entity candidates, or filter by entity and decision status:
+
+```bash
+./build/emberdb_cli catalog candidates list \
+  --review match-review.json \
+  --entity player \
+  --status unresolved
+```
+
+Inspect the fixed name and parent-context evidence captured when a candidate was first
+generated:
+
+```bash
+./build/emberdb_cli catalog candidates inspect \
+  --review match-review.json \
+  --candidate-id 1
+```
+
+Accepting a candidate creates the corresponding provider mapping through the audited
+catalog path. Rejecting it records the decision without changing the catalog. Both
+operations require review provenance:
+
+```bash
+./build/emberdb_cli catalog candidates accept \
+  --review match-review.json \
+  --candidate-id 1 \
+  --actor "reviewer@example.com" \
+  --source "provider profile" \
+  --reason "Verified provider identity"
+
+./build/emberdb_cli catalog candidates reject \
+  --review match-review.json \
+  --candidate-id 2 \
+  --actor "reviewer@example.com" \
+  --source "provider profile" \
+  --reason "Name collision identifies another player"
+```
+
+Entity candidate IDs are stable within their own sequence and are separate from match
+candidate IDs. Regeneration does not duplicate an existing provider/canonical pair or
+overwrite its evidence. Accepted and rejected decisions are durable, revision checked,
+and idempotent; conflicting decisions or mappings fail without changing the review
+file.
+
 ## Match reconciliation review CLI
 
 The reconciliation CLI operates on an existing versioned review store created and
@@ -618,8 +686,10 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
   automatically join the separately supported player, team, competition, or match
   metadata files.
 - Catalog authoring is intentionally one explicit entity or mapping per command. There
-  is no bulk canonical manifest import or metadata-assisted team/player/competition/
-  season candidate review yet.
+  is no bulk canonical manifest import, rename, merge, or deprecation workflow yet.
+- Entity candidates use exact normalized names only. They do not perform fuzzy matching,
+  aliases, transliteration, or automatic acceptance, and the open Wyscout match metadata
+  cannot generate season candidates without names.
 - Match candidate generation through the CLI currently supports StatsBomb and Wyscout
   metadata. There is no automatic candidate acceptance.
 - Accepted match mappings do not yet reconcile or rewrite football events.
@@ -629,11 +699,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is metadata-assisted entity candidate review: stage
-provider competition, season, team, and player metadata; generate explainable candidates
-without mutating mappings; and accept or reject those candidates into the existing
-revisioned audit store. A small bulk canonical-manifest importer can follow once its
-validation and provenance rules are defined. Event reconciliation should remain
-deferred until those prerequisite identities have been exercised on real provider
-catalogs. SQL is also deliberately deferred; when resumed, it should translate into the
-existing typed operations rather than bypassing them.
+The recommended next milestone is catalog hardening against representative offline
+StatsBomb and Wyscout metadata: define reusable catalog fixtures, measure candidate
+coverage and name collisions, and add audited rename, merge, and deprecation semantics
+before supporting larger catalogs. A small bulk canonical-manifest importer can follow
+once its validation, conflict, dry-run, and provenance rules are defined. Event
+reconciliation should remain deferred until these identities have been exercised on
+real provider catalogs. SQL is also deliberately deferred; when resumed, it should
+translate into the existing typed operations rather than bypassing them.

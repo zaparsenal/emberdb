@@ -125,6 +125,22 @@ Initialize and explicitly author a canonical identity review store with:
   --reason "Verified provider identity"
 ```
 
+Generate and review provider-to-canonical entity candidates:
+
+```bash
+./build/emberdb_cli catalog candidates generate \
+  --review match-review.json --entity player \
+  --provider statsbomb --input statsbomb-lineups.json
+./build/emberdb_cli catalog candidates list \
+  --review match-review.json --entity player --status unresolved
+./build/emberdb_cli catalog candidates inspect \
+  --review match-review.json --candidate-id 1
+./build/emberdb_cli catalog candidates accept \
+  --review match-review.json --candidate-id 1 \
+  --actor "reviewer@example.com" --source "provider profile" \
+  --reason "Verified provider identity"
+```
+
 ## Documentation discipline
 
 Keep `README.md`, this file, CLI help, tests, and CMake targets synchronized with implementation. Clearly label planned work as planned. When architecture, commands, schema semantics, coordinate conventions, or limitations change, update the relevant documentation in the same change.

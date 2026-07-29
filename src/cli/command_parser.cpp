@@ -189,11 +189,34 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command = Command::CatalogList;
     } else if (action == "history") {
       options.command = Command::CatalogHistory;
+    } else if (action == "candidates") {
+      if (arguments.size() < 4) {
+        throw std::runtime_error("Expected a catalog candidates action");
+      }
+      const auto candidate_action = arguments[3];
+      if (candidate_action == "generate") {
+        options.command = Command::EntityCandidateGenerate;
+      } else if (candidate_action == "list") {
+        options.command = Command::EntityCandidateList;
+      } else if (candidate_action == "inspect") {
+        options.command = Command::EntityCandidateInspect;
+      } else if (candidate_action == "accept") {
+        options.command = Command::EntityCandidateAccept;
+      } else if (candidate_action == "reject") {
+        options.command = Command::EntityCandidateReject;
+      } else {
+        throw std::runtime_error(
+            "Unknown catalog candidates action '" +
+            std::string(candidate_action) + "'");
+      }
+      first_option = 4;
     } else {
       throw std::runtime_error("Unknown catalog action '" +
                                std::string(action) + "'");
     }
-    first_option = 3;
+    if (action != "candidates") {
+      first_option = 3;
+    }
   } else {
     throw std::runtime_error(
         "Expected the 'import', 'query', 'reconcile', or 'catalog' command");
@@ -317,12 +340,18 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     }
   }
 
+  const bool is_entity_review =
+      options.command == Command::EntityCandidateGenerate ||
+      options.command == Command::EntityCandidateList ||
+      options.command == Command::EntityCandidateInspect ||
+      options.command == Command::EntityCandidateAccept ||
+      options.command == Command::EntityCandidateReject;
   const bool is_catalog =
       options.command == Command::CatalogInit ||
       options.command == Command::CatalogAdd ||
       options.command == Command::CatalogMap ||
       options.command == Command::CatalogList ||
-      options.command == Command::CatalogHistory;
+      options.command == Command::CatalogHistory || is_entity_review;
   const bool has_catalog_identity_options =
       options.catalog_entity || options.has_canonical_id ||
       !options.name.empty() || options.has_competition_id ||
@@ -333,6 +362,82 @@ Options parseOptions(std::span<const std::string_view> arguments) {
   if (is_catalog) {
     if (options.review.empty()) {
       throw std::runtime_error("--review is required for catalog commands");
+    }
+    if (is_entity_review) {
+      const bool has_unrelated_options =
+          options.has_match_id || !options.output.empty() ||
+          !options.database.empty() || options.has_limit ||
+          !options.filters.empty() || !options.projection.empty() ||
+          !options.group_by.empty() || !options.aggregates.empty() ||
+          options.home_first_half_direction.has_value() ||
+          !options.left_provider.empty() || !options.left_input.empty() ||
+          !options.right_provider.empty() || !options.right_input.empty() ||
+          options.has_canonical_match_id || options.has_canonical_id ||
+          !options.name.empty() || options.has_competition_id ||
+          !options.competition.empty() || !options.season.empty() ||
+          options.has_home_team_id || options.has_away_team_id ||
+          options.kickoff_seconds || options.home_score ||
+          options.away_score || !options.provider_id.empty() ||
+          options.provider_match_id;
+      if (has_unrelated_options) {
+        throw std::runtime_error(
+            "unrelated event, reconciliation, or authoring options are not valid "
+            "for catalog candidate commands");
+      }
+      if (options.catalog_entity &&
+          *options.catalog_entity == CatalogEntityType::Match) {
+        throw std::runtime_error(
+            "catalog entity candidates support competition, season, team, or player");
+      }
+      if (options.command == Command::EntityCandidateGenerate) {
+        if (!options.catalog_entity || options.provider.empty() ||
+            options.input.empty()) {
+          throw std::runtime_error(
+              "catalog candidates generate requires --entity, --provider, and --input");
+        }
+        if (options.has_candidate_id || options.candidate_status ||
+            !options.actor.empty() || !options.source.empty() ||
+            !options.reason.empty()) {
+          throw std::runtime_error(
+              "decision and status options are not valid for candidate generation");
+        }
+        return options;
+      }
+      if (options.command == Command::EntityCandidateList) {
+        if (!options.provider.empty() || !options.input.empty() ||
+            options.has_candidate_id || !options.actor.empty() ||
+            !options.source.empty() || !options.reason.empty()) {
+          throw std::runtime_error(
+              "catalog candidates list accepts only --review, --entity, and --status");
+        }
+        return options;
+      }
+      const bool is_decision =
+          options.command == Command::EntityCandidateAccept ||
+          options.command == Command::EntityCandidateReject;
+      if (!options.has_candidate_id || options.candidate_id == 0) {
+        throw std::runtime_error("a positive --candidate-id is required");
+      }
+      if (!options.provider.empty() || !options.input.empty() ||
+          options.catalog_entity || options.candidate_status) {
+        throw std::runtime_error(
+            "provider, entity, input, and status options are not valid for this "
+            "catalog candidate action");
+      }
+      if (is_decision &&
+          (options.actor.empty() || options.source.empty() ||
+           options.reason.empty())) {
+        throw std::runtime_error(
+            "--actor, --source, and --reason are required for catalog candidate "
+            "decisions");
+      }
+      if (!is_decision &&
+          (!options.actor.empty() || !options.source.empty() ||
+           !options.reason.empty())) {
+        throw std::runtime_error(
+            "review provenance is only valid for catalog candidate decisions");
+      }
+      return options;
     }
     const bool has_non_catalog_options =
         options.has_match_id || !options.input.empty() ||
