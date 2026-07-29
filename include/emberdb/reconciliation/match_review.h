@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "emberdb/reconciliation/entity_reconciliation.h"
 #include "emberdb/reconciliation/match_reconciliation.h"
 
 namespace emberdb {
@@ -44,6 +45,14 @@ struct MatchCandidateRecord {
   std::optional<ReviewProvenance> decision_provenance;
 };
 
+struct EntityCandidateRecord {
+  std::uint64_t id{};
+  EntityReconciliation reconciliation;
+  MatchCandidateStatus status{MatchCandidateStatus::Unresolved};
+  std::optional<std::string> rejection_reason;
+  std::optional<ReviewProvenance> decision_provenance;
+};
+
 class MatchReviewStore {
  public:
   MatchReviewStore() = default;
@@ -52,7 +61,8 @@ class MatchReviewStore {
       CanonicalIdentityCatalog catalog,
       std::vector<MatchCandidateRecord> candidates,
       std::uint64_t revision = 0,
-      std::vector<CatalogChangeRecord> catalog_changes = {});
+      std::vector<CatalogChangeRecord> catalog_changes = {},
+      std::vector<EntityCandidateRecord> entity_candidates = {});
 
   [[nodiscard]] const CanonicalIdentityCatalog& catalog() const noexcept;
   [[nodiscard]] std::uint64_t revision() const noexcept;
@@ -82,13 +92,26 @@ class MatchReviewStore {
   [[nodiscard]] const MatchCandidateRecord* candidate(std::uint64_t id) const;
   [[nodiscard]] std::vector<const MatchCandidateRecord*> candidates(
       std::optional<MatchCandidateStatus> status = std::nullopt) const;
+  [[nodiscard]] std::vector<std::uint64_t> addEntityCandidates(
+      const std::vector<EntityReconciliation>& candidates);
+  [[nodiscard]] const EntityCandidateRecord* entityCandidate(
+      std::uint64_t id) const;
+  [[nodiscard]] std::vector<const EntityCandidateRecord*> entityCandidates(
+      std::optional<MatchCandidateStatus> status = std::nullopt,
+      std::optional<IdentityEntityType> entity_type = std::nullopt) const;
 
   void accept(std::uint64_t candidate_id, CanonicalMatchId canonical_match_id,
               ReviewProvenance provenance);
   void reject(std::uint64_t candidate_id, ReviewProvenance provenance);
+  void acceptEntityCandidate(std::uint64_t candidate_id,
+                             ReviewProvenance provenance);
+  void rejectEntityCandidate(std::uint64_t candidate_id,
+                             ReviewProvenance provenance);
 
  private:
   [[nodiscard]] MatchCandidateRecord& requireCandidate(std::uint64_t id);
+  [[nodiscard]] EntityCandidateRecord& requireEntityCandidate(
+      std::uint64_t id);
   void recordCatalogChange(CatalogChangeAction action,
                            CatalogEntityType entity_type,
                            Identifier canonical_id,
@@ -101,9 +124,11 @@ class MatchReviewStore {
 
   CanonicalIdentityCatalog catalog_;
   std::vector<MatchCandidateRecord> candidates_;
+  std::vector<EntityCandidateRecord> entity_candidates_;
   std::vector<CatalogChangeRecord> catalog_changes_;
   std::uint64_t revision_{};
   std::uint64_t next_candidate_id_{1};
+  std::uint64_t next_entity_candidate_id_{1};
 };
 
 [[nodiscard]] std::string_view matchCandidateStatusName(

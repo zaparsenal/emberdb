@@ -7,7 +7,7 @@
 
 namespace emberdb {
 
-inline constexpr std::uint32_t kMatchReviewFileFormatVersion = 2;
+inline constexpr std::uint32_t kMatchReviewFileFormatVersion = 3;
 
 void createMatchReviewStore(const MatchReviewStore& store,
                             const std::filesystem::path& path);

@@ -15,6 +15,7 @@ Implemented milestones include:
   team, player, and match catalogs;
 - deterministic provider-to-canonical competition, season, team, and player candidate
   generation with explicit name and parent-competition evidence;
+- durable entity candidate records with unresolved, accepted, and rejected states;
 - deterministic match reconciliation candidates with per-field provenance, status, and
   confidence;
 - a durable review store for canonical catalogs, provider mappings, generated match
@@ -139,10 +140,14 @@ missing parent mapping remains visible as missing context. Duplicate provider re
 are collapsed only when their values agree; conflicting duplicates fail explicitly.
 Already-mapped provider identities are skipped.
 
-The programmatic API is declared in
-`include/emberdb/reconciliation/entity_reconciliation.h`. Durable entity candidate
-review and CLI commands are the next slice; candidate generation itself never creates a
-mapping.
+The programmatic APIs are declared in
+`include/emberdb/reconciliation/entity_reconciliation.h` and
+`include/emberdb/reconciliation/match_review.h`. Adding generated candidates is
+idempotent and preserves the first evidence snapshot. Acceptance creates the typed
+provider mapping through the same audited catalog path used by manual authoring;
+rejection preserves its reason. Conflicting mappings fail without finalizing the
+candidate. Candidate generation itself never creates a mapping. CLI commands are the
+next slice.
 
 ## Match reconciliation
 
@@ -531,12 +536,13 @@ a version 2 database.
 ## Persistent match review format
 
 Match review files are separate UTF-8 JSON documents identified by
-`emberdb-match-review` and format version 2. They store canonical competition, season,
-team, player, and match catalogs; all provider mappings; generated match candidates;
-numeric confidence; complete per-field evidence; decision status and provenance;
-catalog-change provenance; and a monotonic store revision. Version 1 review files load
-as revision zero with empty competition/season catalogs and no synthesized mappings;
-the next successful write upgrades them to version 2.
+`emberdb-match-review` and format version 3. They store canonical competition, season,
+team, player, and match catalogs; all provider mappings; generated match and entity
+candidates; numeric confidence; complete per-field evidence; decision status and
+provenance; catalog-change provenance; and a monotonic store revision. Version 1 review
+files load as revision zero with empty competition/season catalogs and no synthesized
+mappings. Version 2 files retain their catalog and match-review data with no entity
+candidates. The next successful write upgrades either earlier version to version 3.
 
 Loading rebuilds the canonical catalog through its validation APIs and rejects duplicate
 records, dangling mappings, invalid candidate values, contradictory decision fields,

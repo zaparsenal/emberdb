@@ -17,6 +17,14 @@ bool samePair(const MatchCandidateRecord& record,
          record.reconciliation.right_match == reconciliation.right_match;
 }
 
+bool sameEntityPair(const EntityCandidateRecord& record,
+                    const EntityReconciliation& reconciliation) {
+  return record.reconciliation.entity_type == reconciliation.entity_type &&
+         record.reconciliation.provider_identity ==
+             reconciliation.provider_identity &&
+         record.reconciliation.canonical_id == reconciliation.canonical_id;
+}
+
 bool blank(std::string_view value) {
   return std::ranges::all_of(value, [](char character) {
     return std::isspace(static_cast<unsigned char>(character)) != 0;
@@ -57,6 +65,75 @@ bool canonicalEntityExists(const CanonicalIdentityCatalog& catalog,
       return catalog.match({canonical_id}) != nullptr;
   }
   return false;
+}
+
+bool canonicalEntityExists(const CanonicalIdentityCatalog& catalog,
+                           IdentityEntityType entity_type,
+                           Identifier canonical_id) {
+  switch (entity_type) {
+    case IdentityEntityType::Competition:
+      return catalog.competition({canonical_id}) != nullptr;
+    case IdentityEntityType::Season:
+      return catalog.season({canonical_id}) != nullptr;
+    case IdentityEntityType::Team:
+      return catalog.team({canonical_id}) != nullptr;
+    case IdentityEntityType::Player:
+      return catalog.player({canonical_id}) != nullptr;
+  }
+  return false;
+}
+
+bool entityMappingMatches(const CanonicalIdentityCatalog& catalog,
+                          const EntityReconciliation& reconciliation) {
+  const auto& reference = reconciliation.provider_identity;
+  switch (reconciliation.entity_type) {
+    case IdentityEntityType::Competition:
+      return catalog.resolveCompetition({reference.provider, reference.id}) ==
+             CanonicalCompetitionId{reconciliation.canonical_id};
+    case IdentityEntityType::Season:
+      return catalog.resolveSeason({reference.provider, reference.id}) ==
+             CanonicalSeasonId{reconciliation.canonical_id};
+    case IdentityEntityType::Team:
+      return catalog.resolveTeam(
+                 {reference.provider, reference.id, reference.match_id}) ==
+             CanonicalTeamId{reconciliation.canonical_id};
+    case IdentityEntityType::Player:
+      return catalog.resolvePlayer(
+                 {reference.provider, reference.id, reference.match_id}) ==
+             CanonicalPlayerId{reconciliation.canonical_id};
+  }
+  return false;
+}
+
+void validateEntityReconciliation(
+    const CanonicalIdentityCatalog& catalog,
+    const EntityReconciliation& reconciliation) {
+  if (reconciliation.canonical_id <= 0 ||
+      reconciliation.provider_identity.provider.empty() ||
+      reconciliation.provider_identity.id.empty() ||
+      reconciliation.source.empty() || blank(reconciliation.source) ||
+      reconciliation.name.status != ReconciliationStatus::Agreeing ||
+      !reconciliation.name.provider_value ||
+      !reconciliation.name.canonical_value ||
+      reconciliation.name.provider_value->empty() ||
+      blank(*reconciliation.name.provider_value) ||
+      reconciliation.name.canonical_value->empty() ||
+      blank(*reconciliation.name.canonical_value) ||
+      reconciliation.context.status == ReconciliationStatus::Conflicting ||
+      !std::isfinite(reconciliation.confidence) ||
+      reconciliation.confidence < 0.0 ||
+      reconciliation.confidence > 1.0 ||
+      !canonicalEntityExists(catalog, reconciliation.entity_type,
+                             reconciliation.canonical_id)) {
+    throw std::invalid_argument(
+        "entity candidate contains invalid comparison data");
+  }
+  if ((reconciliation.entity_type == IdentityEntityType::Competition ||
+       reconciliation.entity_type == IdentityEntityType::Season) &&
+      reconciliation.provider_identity.match_id) {
+    throw std::invalid_argument(
+        "competition or season candidate has a match scope");
+  }
 }
 
 bool catalogMappingMatches(const CanonicalIdentityCatalog& catalog,
@@ -106,7 +183,8 @@ MatchReviewStore::MatchReviewStore(CanonicalIdentityCatalog catalog)
 MatchReviewStore MatchReviewStore::restore(
     CanonicalIdentityCatalog catalog,
     std::vector<MatchCandidateRecord> candidates, std::uint64_t revision,
-    std::vector<CatalogChangeRecord> catalog_changes) {
+    std::vector<CatalogChangeRecord> catalog_changes,
+    std::vector<EntityCandidateRecord> entity_candidates) {
   MatchReviewStore store(std::move(catalog));
   store.revision_ = revision;
   for (const auto& record : candidates) {
@@ -202,6 +280,56 @@ MatchReviewStore MatchReviewStore::restore(
     previous_revision = change.revision;
     store.catalog_changes_.push_back(change);
   }
+  for (const auto& record : entity_candidates) {
+    const auto& reconciliation = record.reconciliation;
+    if (record.id == 0) {
+      throw std::invalid_argument("persisted entity candidate has an invalid ID");
+    }
+    validateEntityReconciliation(store.catalog_, reconciliation);
+    if (store.entityCandidate(record.id) != nullptr ||
+        std::ranges::any_of(
+            store.entity_candidates_, [&reconciliation](const auto& existing) {
+              return sameEntityPair(existing, reconciliation);
+            })) {
+      throw std::invalid_argument(
+          "persisted entity candidates contain duplicates");
+    }
+    switch (record.status) {
+      case MatchCandidateStatus::Unresolved:
+        if (record.rejection_reason || record.decision_provenance) {
+          throw std::invalid_argument(
+              "unresolved entity candidate contains finalized decision data");
+        }
+        break;
+      case MatchCandidateStatus::Accepted:
+        if (record.rejection_reason || !record.decision_provenance ||
+            !entityMappingMatches(store.catalog_, reconciliation)) {
+          throw std::invalid_argument(
+              "accepted entity candidate does not match its durable catalog mapping");
+        }
+        break;
+      case MatchCandidateStatus::Rejected:
+        if (!record.rejection_reason || !record.decision_provenance ||
+            record.rejection_reason->empty() ||
+            blank(*record.rejection_reason)) {
+          throw std::invalid_argument(
+              "rejected entity candidate has invalid decision data");
+        }
+        break;
+    }
+    if (record.decision_provenance) {
+      validateProvenance(*record.decision_provenance);
+    }
+    if (record.id >= std::numeric_limits<std::uint64_t>::max() - 1U) {
+      throw std::invalid_argument(
+          "persisted entity candidate ID is too large");
+    }
+    store.next_entity_candidate_id_ =
+        std::max(store.next_entity_candidate_id_, record.id + 1U);
+    store.entity_candidates_.push_back(record);
+  }
+  std::ranges::sort(store.entity_candidates_, {},
+                    &EntityCandidateRecord::id);
   return store;
 }
 
@@ -406,6 +534,64 @@ std::vector<const MatchCandidateRecord*> MatchReviewStore::candidates(
   return result;
 }
 
+std::vector<std::uint64_t> MatchReviewStore::addEntityCandidates(
+    const std::vector<EntityReconciliation>& candidates) {
+  std::vector<std::uint64_t> ids;
+  ids.reserve(candidates.size());
+  bool added_candidate = false;
+  for (const auto& reconciliation : candidates) {
+    validateEntityReconciliation(catalog_, reconciliation);
+    const auto existing = std::ranges::find_if(
+        entity_candidates_,
+        [&reconciliation](const EntityCandidateRecord& record) {
+          return sameEntityPair(record, reconciliation);
+        });
+    if (existing != entity_candidates_.end()) {
+      ids.push_back(existing->id);
+      continue;
+    }
+    if (next_entity_candidate_id_ ==
+        std::numeric_limits<std::uint64_t>::max()) {
+      throw std::overflow_error(
+          "entity candidate ID space is exhausted");
+    }
+    if (!added_candidate) {
+      requireRevisionAvailable(revision_);
+    }
+    const auto id = next_entity_candidate_id_++;
+    entity_candidates_.push_back(
+        {id, reconciliation, MatchCandidateStatus::Unresolved, std::nullopt,
+         std::nullopt});
+    added_candidate = true;
+    ids.push_back(id);
+  }
+  if (added_candidate) {
+    advanceRevision();
+  }
+  return ids;
+}
+
+const EntityCandidateRecord* MatchReviewStore::entityCandidate(
+    std::uint64_t id) const {
+  const auto position = std::ranges::find(
+      entity_candidates_, id, &EntityCandidateRecord::id);
+  return position == entity_candidates_.end() ? nullptr : &*position;
+}
+
+std::vector<const EntityCandidateRecord*> MatchReviewStore::entityCandidates(
+    std::optional<MatchCandidateStatus> status,
+    std::optional<IdentityEntityType> entity_type) const {
+  std::vector<const EntityCandidateRecord*> result;
+  for (const auto& candidate : entity_candidates_) {
+    if ((!status || candidate.status == *status) &&
+        (!entity_type ||
+         candidate.reconciliation.entity_type == *entity_type)) {
+      result.push_back(&candidate);
+    }
+  }
+  return result;
+}
+
 void MatchReviewStore::accept(std::uint64_t candidate_id,
                               CanonicalMatchId canonical_match_id,
                               ReviewProvenance provenance) {
@@ -463,6 +649,72 @@ void MatchReviewStore::reject(std::uint64_t candidate_id,
   advanceRevision();
 }
 
+void MatchReviewStore::acceptEntityCandidate(
+    std::uint64_t candidate_id, ReviewProvenance provenance) {
+  auto& record = requireEntityCandidate(candidate_id);
+  if (record.status == MatchCandidateStatus::Accepted) {
+    return;
+  }
+  if (record.status == MatchCandidateStatus::Rejected) {
+    throw std::invalid_argument(
+        "entity candidate " + std::to_string(candidate_id) +
+        " is already rejected");
+  }
+  validateProvenance(provenance);
+  requireRevisionAvailable(revision_);
+  const auto revision_before_mapping = revision_;
+  const auto& reconciliation = record.reconciliation;
+  const auto& reference = reconciliation.provider_identity;
+  switch (reconciliation.entity_type) {
+    case IdentityEntityType::Competition:
+      mapCompetition({reference.provider, reference.id},
+                     {reconciliation.canonical_id}, provenance);
+      break;
+    case IdentityEntityType::Season:
+      mapSeason({reference.provider, reference.id},
+                {reconciliation.canonical_id}, provenance);
+      break;
+    case IdentityEntityType::Team:
+      mapTeam({reference.provider, reference.id, reference.match_id},
+              {reconciliation.canonical_id}, provenance);
+      break;
+    case IdentityEntityType::Player:
+      mapPlayer({reference.provider, reference.id, reference.match_id},
+                {reconciliation.canonical_id}, provenance);
+      break;
+  }
+  record.status = MatchCandidateStatus::Accepted;
+  record.decision_provenance = std::move(provenance);
+  if (revision_ == revision_before_mapping) {
+    advanceRevision();
+  }
+}
+
+void MatchReviewStore::rejectEntityCandidate(
+    std::uint64_t candidate_id, ReviewProvenance provenance) {
+  validateProvenance(provenance);
+  const auto& reason = provenance.reason;
+  auto& record = requireEntityCandidate(candidate_id);
+  if (record.status == MatchCandidateStatus::Rejected) {
+    if (record.rejection_reason == reason) {
+      return;
+    }
+    throw std::invalid_argument(
+        "entity candidate " + std::to_string(candidate_id) +
+        " is already rejected with a different reason");
+  }
+  if (record.status == MatchCandidateStatus::Accepted) {
+    throw std::invalid_argument(
+        "entity candidate " + std::to_string(candidate_id) +
+        " is already accepted");
+  }
+  requireRevisionAvailable(revision_);
+  record.status = MatchCandidateStatus::Rejected;
+  record.rejection_reason = reason;
+  record.decision_provenance = std::move(provenance);
+  advanceRevision();
+}
+
 void MatchReviewStore::recordCatalogChange(
     CatalogChangeAction action, CatalogEntityType entity_type,
     Identifier canonical_id, std::string canonical_name,
@@ -486,6 +738,17 @@ MatchCandidateRecord& MatchReviewStore::requireCandidate(std::uint64_t id) {
                                           &MatchCandidateRecord::id);
   if (position == candidates_.end()) {
     throw std::invalid_argument("unknown match candidate " + std::to_string(id));
+  }
+  return *position;
+}
+
+EntityCandidateRecord& MatchReviewStore::requireEntityCandidate(
+    std::uint64_t id) {
+  const auto position = std::ranges::find(
+      entity_candidates_, id, &EntityCandidateRecord::id);
+  if (position == entity_candidates_.end()) {
+    throw std::invalid_argument(
+        "unknown entity candidate " + std::to_string(id));
   }
   return *position;
 }

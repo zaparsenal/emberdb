@@ -102,6 +102,7 @@ if(BUILD_TESTING)
     tests/cli_renderer_test.cpp
     tests/coordinate_normalization_test.cpp
     tests/entity_reconciliation_test.cpp
+    tests/entity_review_test.cpp
     tests/football_event_validation_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp

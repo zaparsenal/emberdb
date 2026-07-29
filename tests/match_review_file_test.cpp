@@ -71,6 +71,19 @@ class MatchReviewFileTest : public ::testing::Test {
     return emberdb::reconcileMatches(left, right, store.catalog());
   }
 
+  emberdb::EntityReconciliation entityCandidate(
+      emberdb::IdentityEntityType entity_type, std::string provider_id,
+      emberdb::Identifier canonical_id, std::string name) const {
+    return {entity_type,
+            {"OtherProvider", std::move(provider_id), std::nullopt},
+            canonical_id,
+            "entity metadata fixture",
+            {emberdb::ReconciliationStatus::Agreeing, name, name},
+            {emberdb::ReconciliationStatus::Missing, std::nullopt,
+             std::nullopt},
+            1.0};
+  }
+
   std::filesystem::path path_;
 };
 
@@ -79,10 +92,21 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   const auto ids = original.addCandidates(
       {candidate(original, "2499719"), candidate(original, "2499720"),
        candidate(original, "2499721")});
+  const auto entity_ids = original.addEntityCandidates(
+      {entityCandidate(emberdb::IdentityEntityType::Competition,
+                       "competition", 20, "Premier League"),
+       entityCandidate(emberdb::IdentityEntityType::Team, "team", 1,
+                       "Arsenal"),
+       entityCandidate(emberdb::IdentityEntityType::Player, "player", 10,
+                       "Alex Forward")});
   original.accept(ids[0], {100}, provenance("Metadata agrees"));
   original.reject(
       ids[1],
       provenance("Provider correction identifies another fixture"));
+  original.acceptEntityCandidate(entity_ids[0],
+                                 provenance("Competition verified"));
+  original.rejectEntityCandidate(entity_ids[1],
+                                 provenance("Different team"));
 
   emberdb::createMatchReviewStore(original, path_);
   const auto loaded = emberdb::loadMatchReviewStore(path_);
@@ -111,6 +135,16 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   EXPECT_DOUBLE_EQ(loaded.candidate(ids[2])->reconciliation.confidence, 1.0);
   EXPECT_EQ(loaded.candidate(ids[2])->reconciliation.home_team.canonical_value,
             "1");
+  ASSERT_EQ(loaded.entityCandidates().size(), 3U);
+  EXPECT_EQ(loaded.entityCandidate(entity_ids[0])->status,
+            emberdb::MatchCandidateStatus::Accepted);
+  EXPECT_EQ(loaded.catalog().resolveCompetition(
+                {"OtherProvider", "competition"}),
+            emberdb::CanonicalCompetitionId{20});
+  EXPECT_EQ(loaded.entityCandidate(entity_ids[1])->rejection_reason,
+            "Different team");
+  EXPECT_EQ(loaded.entityCandidate(entity_ids[2])->status,
+            emberdb::MatchCandidateStatus::Unresolved);
 }
 
 TEST_F(MatchReviewFileTest, AtomicallyReplacesExistingReviewFile) {
