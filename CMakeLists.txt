@@ -37,6 +37,7 @@ add_library(emberdb
   src/common/coordinate_normalization.cpp
   src/common/football_event.cpp
   src/common/football_event_column.cpp
+  src/identity/catalog_manifest.cpp
   src/identity/canonical_identity.cpp
   src/ingestion/metrica_event_adapter.cpp
   src/ingestion/statsbomb_metadata_adapter.cpp
@@ -98,6 +99,7 @@ if(BUILD_TESTING)
 
   add_executable(emberdb_tests
     tests/aggregation_query_test.cpp
+    tests/catalog_manifest_test.cpp
     tests/catalog_validation_test.cpp
     tests/canonical_identity_test.cpp
     tests/cli_command_parser_test.cpp
