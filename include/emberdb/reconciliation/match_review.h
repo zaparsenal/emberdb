@@ -21,7 +21,7 @@ struct ReviewProvenance {
   std::chrono::sys_seconds recorded_at;
 };
 
-enum class CatalogChangeAction { Add, Map };
+enum class CatalogChangeAction { Add, Map, Rename, Deprecate, Merge };
 enum class CatalogEntityType { Competition, Season, Team, Player, Match };
 
 struct CatalogChangeRecord {
@@ -34,6 +34,7 @@ struct CatalogChangeRecord {
   std::optional<std::string> provider_id;
   std::optional<std::string> provider_match_id;
   ReviewProvenance provenance;
+  std::optional<Identifier> related_canonical_id;
 };
 
 struct MatchCandidateRecord {
@@ -86,6 +87,16 @@ class MatchReviewStore {
   void mapPlayer(ProviderPlayerReference provider_player,
                  CanonicalPlayerId canonical_player,
                  ReviewProvenance provenance);
+  void renameCatalogEntity(CatalogEntityType entity_type,
+                           Identifier canonical_id, std::string name,
+                           ReviewProvenance provenance);
+  void deprecateCatalogEntity(CatalogEntityType entity_type,
+                              Identifier canonical_id,
+                              ReviewProvenance provenance);
+  void mergeCatalogEntity(CatalogEntityType entity_type,
+                          Identifier source_canonical_id,
+                          Identifier target_canonical_id,
+                          ReviewProvenance provenance);
 
   [[nodiscard]] std::vector<std::uint64_t> addCandidates(
       const std::vector<MatchReconciliation>& candidates);
@@ -119,7 +130,9 @@ class MatchReviewStore {
                            std::optional<std::string> provider,
                            std::optional<std::string> provider_id,
                            std::optional<std::string> provider_match_id,
-                           ReviewProvenance provenance);
+                           ReviewProvenance provenance,
+                           std::optional<Identifier> related_canonical_id =
+                               std::nullopt);
   void advanceRevision();
 
   CanonicalIdentityCatalog catalog_;

@@ -24,6 +24,9 @@ enum class Command {
   CatalogInit,
   CatalogAdd,
   CatalogMap,
+  CatalogRename,
+  CatalogDeprecate,
+  CatalogMerge,
   CatalogList,
   CatalogHistory,
   EntityCandidateGenerate,
@@ -61,6 +64,8 @@ struct Options {
   std::optional<CatalogEntityType> catalog_entity;
   Identifier canonical_id{};
   bool has_canonical_id{};
+  Identifier target_canonical_id{};
+  bool has_target_canonical_id{};
   std::string name;
   Identifier competition_id{};
   bool has_competition_id{};

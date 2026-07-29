@@ -18,6 +18,9 @@ Provider metadata follows a separate path:
 - `FootballEvent` is the provider-independent interchange model.
 - Canonical match, team, and player identity stays separate from provider event fields;
   mappings must be explicit until a reconciliation milestone defines otherwise.
+- Canonical competition, season, team, and player lifecycle changes are non-destructive:
+  deprecated and merged records remain durable, and every rename, deprecation, or merge
+  must pass through the audited review-store path.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
 - Route normalized events through `validateFootballEvent`; adapters should add provider
   record context to validation failures rather than duplicating provider-neutral rules.
@@ -123,6 +126,18 @@ Initialize and explicitly author a canonical identity review store with:
   --entity team --canonical-id 1 --provider StatsBomb --provider-id 10 \
   --actor "reviewer@example.com" --source "StatsBomb teams" \
   --reason "Verified provider identity"
+./build/emberdb_cli catalog rename --review match-review.json \
+  --entity team --canonical-id 1 --name "Ember City" \
+  --actor "reviewer@example.com" --source "league registry" \
+  --reason "Correct canonical display name"
+./build/emberdb_cli catalog merge --review match-review.json \
+  --entity player --canonical-id 11 --target-canonical-id 10 \
+  --actor "reviewer@example.com" --source "catalog review" \
+  --reason "Consolidate duplicate identity"
+./build/emberdb_cli catalog deprecate --review match-review.json \
+  --entity player --canonical-id 12 \
+  --actor "reviewer@example.com" --source "catalog review" \
+  --reason "Retire inactive identity"
 ```
 
 Generate and review provider-to-canonical entity candidates:

@@ -185,6 +185,12 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command = Command::CatalogAdd;
     } else if (action == "map") {
       options.command = Command::CatalogMap;
+    } else if (action == "rename") {
+      options.command = Command::CatalogRename;
+    } else if (action == "deprecate") {
+      options.command = Command::CatalogDeprecate;
+    } else if (action == "merge") {
+      options.command = Command::CatalogMerge;
     } else if (action == "list") {
       options.command = Command::CatalogList;
     } else if (action == "history") {
@@ -304,6 +310,9 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     } else if (option == "--canonical-id") {
       options.canonical_id = parseInteger<Identifier>(value, option);
       options.has_canonical_id = true;
+    } else if (option == "--target-canonical-id") {
+      options.target_canonical_id = parseInteger<Identifier>(value, option);
+      options.has_target_canonical_id = true;
     } else if (option == "--name") {
       options.name = value;
     } else if (option == "--competition-id") {
@@ -350,10 +359,14 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::CatalogInit ||
       options.command == Command::CatalogAdd ||
       options.command == Command::CatalogMap ||
+      options.command == Command::CatalogRename ||
+      options.command == Command::CatalogDeprecate ||
+      options.command == Command::CatalogMerge ||
       options.command == Command::CatalogList ||
       options.command == Command::CatalogHistory || is_entity_review;
   const bool has_catalog_identity_options =
       options.catalog_entity || options.has_canonical_id ||
+      options.has_target_canonical_id ||
       !options.name.empty() || options.has_competition_id ||
       !options.competition.empty() || !options.season.empty() ||
       options.has_home_team_id || options.has_away_team_id ||
@@ -373,6 +386,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
           !options.left_provider.empty() || !options.left_input.empty() ||
           !options.right_provider.empty() || !options.right_input.empty() ||
           options.has_canonical_match_id || options.has_canonical_id ||
+          options.has_target_canonical_id ||
           !options.name.empty() || options.has_competition_id ||
           !options.competition.empty() || !options.season.empty() ||
           options.has_home_team_id || options.has_away_team_id ||
@@ -454,8 +468,12 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       throw std::runtime_error(
           "event, query, and reconciliation options are not valid for catalog commands");
     }
-    const bool is_mutation = options.command == Command::CatalogAdd ||
-                             options.command == Command::CatalogMap;
+    const bool is_mutation =
+        options.command == Command::CatalogAdd ||
+        options.command == Command::CatalogMap ||
+        options.command == Command::CatalogRename ||
+        options.command == Command::CatalogDeprecate ||
+        options.command == Command::CatalogMerge;
     if (is_mutation &&
         (options.actor.empty() || options.source.empty() ||
          options.reason.empty())) {
@@ -476,14 +494,55 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       return options;
     }
     if (!options.catalog_entity) {
-      throw std::runtime_error("--entity is required for catalog add or map");
+      throw std::runtime_error("--entity is required for catalog mutations");
     }
     if (!options.has_canonical_id || options.canonical_id <= 0) {
       throw std::runtime_error("a positive --canonical-id is required");
     }
+    const bool has_authoring_fields =
+        options.has_competition_id || !options.competition.empty() ||
+        !options.season.empty() || options.has_home_team_id ||
+        options.has_away_team_id || options.kickoff_seconds ||
+        options.home_score || options.away_score;
+    const bool has_provider_identity =
+        !options.provider.empty() || !options.provider_id.empty() ||
+        options.provider_match_id;
+    if (options.command == Command::CatalogRename ||
+        options.command == Command::CatalogDeprecate ||
+        options.command == Command::CatalogMerge) {
+      if (*options.catalog_entity == CatalogEntityType::Match) {
+        throw std::runtime_error(
+            "catalog maintenance supports competition, season, team, or player");
+      }
+      if (has_authoring_fields || has_provider_identity) {
+        throw std::runtime_error(
+            "authoring and provider options are not valid for catalog maintenance");
+      }
+      if (options.command == Command::CatalogRename) {
+        if (options.name.empty() || options.has_target_canonical_id) {
+          throw std::runtime_error(
+              "catalog rename requires --name and does not accept "
+              "--target-canonical-id");
+        }
+      } else if (options.command == Command::CatalogDeprecate) {
+        if (!options.name.empty() || options.has_target_canonical_id) {
+          throw std::runtime_error(
+              "catalog deprecate accepts no name or target canonical ID");
+        }
+      } else {
+        if (!options.name.empty() || !options.has_target_canonical_id ||
+            options.target_canonical_id <= 0 ||
+            options.target_canonical_id == options.canonical_id) {
+          throw std::runtime_error(
+              "catalog merge requires a different positive "
+              "--target-canonical-id");
+        }
+      }
+      return options;
+    }
     if (options.command == Command::CatalogAdd) {
       if (!options.provider.empty() || !options.provider_id.empty() ||
-          options.provider_match_id) {
+          options.provider_match_id || options.has_target_canonical_id) {
         throw std::runtime_error(
             "provider identity options are only valid for catalog map");
       }
@@ -533,6 +592,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
           "--provider and --provider-id are required for catalog map");
     }
     if (!options.name.empty() || options.has_competition_id ||
+        options.has_target_canonical_id ||
         !options.competition.empty() || !options.season.empty() ||
         options.has_home_team_id || options.has_away_team_id ||
         options.kickoff_seconds || options.home_score ||

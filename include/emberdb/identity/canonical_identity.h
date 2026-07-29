@@ -6,7 +6,9 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 
 #include "emberdb/common/football_event.h"
 
@@ -37,25 +39,50 @@ struct CanonicalSeasonId {
   auto operator<=>(const CanonicalSeasonId&) const = default;
 };
 
+enum class CanonicalEntityStatus { Active, Deprecated, Merged };
+
 struct CanonicalCompetition {
+  CanonicalCompetition(CanonicalCompetitionId id, std::string name)
+      : id(id), name(std::move(name)) {}
+
   CanonicalCompetitionId id;
   std::string name;
+  CanonicalEntityStatus status{CanonicalEntityStatus::Active};
+  std::optional<CanonicalCompetitionId> merged_into;
 };
 
 struct CanonicalSeason {
+  CanonicalSeason(CanonicalSeasonId id,
+                  CanonicalCompetitionId competition_id, std::string name)
+      : id(id),
+        competition_id(competition_id),
+        name(std::move(name)) {}
+
   CanonicalSeasonId id;
   CanonicalCompetitionId competition_id;
   std::string name;
+  CanonicalEntityStatus status{CanonicalEntityStatus::Active};
+  std::optional<CanonicalSeasonId> merged_into;
 };
 
 struct CanonicalTeam {
+  CanonicalTeam(CanonicalTeamId id, std::string name)
+      : id(id), name(std::move(name)) {}
+
   CanonicalTeamId id;
   std::string name;
+  CanonicalEntityStatus status{CanonicalEntityStatus::Active};
+  std::optional<CanonicalTeamId> merged_into;
 };
 
 struct CanonicalPlayer {
+  CanonicalPlayer(CanonicalPlayerId id, std::string name)
+      : id(id), name(std::move(name)) {}
+
   CanonicalPlayerId id;
   std::string name;
+  CanonicalEntityStatus status{CanonicalEntityStatus::Active};
+  std::optional<CanonicalPlayerId> merged_into;
 };
 
 struct CanonicalMatch {
@@ -134,6 +161,21 @@ class CanonicalIdentityCatalog {
   void addPlayer(CanonicalPlayer player);
   void addMatch(CanonicalMatch match);
 
+  void renameCompetition(CanonicalCompetitionId competition,
+                         std::string name);
+  void renameSeason(CanonicalSeasonId season, std::string name);
+  void renameTeam(CanonicalTeamId team, std::string name);
+  void renamePlayer(CanonicalPlayerId player, std::string name);
+  void deprecateCompetition(CanonicalCompetitionId competition);
+  void deprecateSeason(CanonicalSeasonId season);
+  void deprecateTeam(CanonicalTeamId team);
+  void deprecatePlayer(CanonicalPlayerId player);
+  void mergeCompetition(CanonicalCompetitionId source,
+                        CanonicalCompetitionId target);
+  void mergeSeason(CanonicalSeasonId source, CanonicalSeasonId target);
+  void mergeTeam(CanonicalTeamId source, CanonicalTeamId target);
+  void mergePlayer(CanonicalPlayerId source, CanonicalPlayerId target);
+
   void mapCompetition(ProviderCompetitionReference provider_competition,
                       CanonicalCompetitionId canonical_competition);
   void mapSeason(ProviderSeasonReference provider_season,
@@ -200,5 +242,8 @@ class CanonicalIdentityCatalog {
   std::map<ProviderPlayerReference, CanonicalPlayerId> player_mappings_;
   std::map<ProviderMatchReference, CanonicalMatchId> match_mappings_;
 };
+
+[[nodiscard]] std::string_view canonicalEntityStatusName(
+    CanonicalEntityStatus status) noexcept;
 
 }  // namespace emberdb

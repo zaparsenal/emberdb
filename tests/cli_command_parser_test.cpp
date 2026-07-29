@@ -221,6 +221,57 @@ TEST(CliCommandParserTest, ParsesEntityCandidateLifecycleOptions) {
   EXPECT_EQ(accept.reason, "Verified identity");
 }
 
+TEST(CliCommandParserTest, ParsesCatalogMaintenanceOptions) {
+  constexpr std::array rename_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"rename"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"player"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"10"},
+      std::string_view{"--name"},
+      std::string_view{"Alex A. Forward"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"provider profile"},
+      std::string_view{"--reason"},
+      std::string_view{"Correct display name"}};
+  const auto rename = emberdb::cli::parseOptions(rename_arguments);
+
+  EXPECT_EQ(rename.command, emberdb::cli::Command::CatalogRename);
+  EXPECT_EQ(rename.catalog_entity, emberdb::CatalogEntityType::Player);
+  EXPECT_EQ(rename.canonical_id, 10);
+  EXPECT_EQ(rename.name, "Alex A. Forward");
+
+  constexpr std::array merge_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"merge"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"player"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"11"},
+      std::string_view{"--target-canonical-id"},
+      std::string_view{"10"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"provider profile"},
+      std::string_view{"--reason"},
+      std::string_view{"Duplicate identity"}};
+  const auto merge = emberdb::cli::parseOptions(merge_arguments);
+
+  EXPECT_EQ(merge.command, emberdb::cli::Command::CatalogMerge);
+  EXPECT_EQ(merge.canonical_id, 11);
+  EXPECT_EQ(merge.target_canonical_id, 10);
+}
+
 TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
   constexpr std::array mixed_sources{
       std::string_view{"emberdb_cli"},
@@ -290,6 +341,28 @@ TEST(CliCommandParserTest, PreservesCommandValidationFailures) {
   EXPECT_THROW(
       static_cast<void>(
           emberdb::cli::parseOptions(invalid_entity_candidate)),
+      std::runtime_error);
+
+  constexpr std::array invalid_self_merge{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"merge"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--entity"},
+      std::string_view{"player"},
+      std::string_view{"--canonical-id"},
+      std::string_view{"10"},
+      std::string_view{"--target-canonical-id"},
+      std::string_view{"10"},
+      std::string_view{"--actor"},
+      std::string_view{"reviewer"},
+      std::string_view{"--source"},
+      std::string_view{"fixture"},
+      std::string_view{"--reason"},
+      std::string_view{"Invalid merge"}};
+  EXPECT_THROW(
+      static_cast<void>(emberdb::cli::parseOptions(invalid_self_merge)),
       std::runtime_error);
 }
 

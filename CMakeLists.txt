@@ -495,20 +495,97 @@ if(BUILD_TESTING)
     PASS_REGULAR_EXPRESSION "2.rejected.team.1.StatsBomb:20.2"
   )
   add_test(
-    NAME EmberDbCliCatalogTest.ListsCatalog
+    NAME EmberDbCliCatalogTest.AddsDuplicatePlayer
+    COMMAND emberdb_cli catalog add
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 11 --name "Alex F."
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Create duplicate player for maintenance coverage"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.AddsDuplicatePlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsRejectedTeamCandidate
+    PASS_REGULAR_EXPRESSION "Catalog revision 15: add player 11"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MapsDuplicatePlayer
+    COMMAND emberdb_cli catalog map
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 11
+      --provider Wyscout --provider-id 25413
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Map duplicate player"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MapsDuplicatePlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.AddsDuplicatePlayer
+    PASS_REGULAR_EXPRESSION "Catalog revision 16: map player 11"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.RenamesPlayer
+    COMMAND emberdb_cli catalog rename
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 10 --name "Alex A. Forward"
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Correct canonical display name"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.RenamesPlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MapsDuplicatePlayer
+    PASS_REGULAR_EXPRESSION "Catalog revision 17: rename player 10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.MergesDuplicatePlayer
+    COMMAND emberdb_cli catalog merge
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity player --canonical-id 11 --target-canonical-id 10
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Consolidate duplicate identity"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.MergesDuplicatePlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.RenamesPlayer
+    PASS_REGULAR_EXPRESSION "Catalog revision 18: merge player 11 -> 10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.DeprecatesAwayTeam
+    COMMAND emberdb_cli catalog deprecate
+      --review ${EMBERDB_CLI_CATALOG_REVIEW}
+      --entity team --canonical-id 2
+      --actor "CTest reviewer" --source "offline fixtures"
+      --reason "Retire inactive catalog entry"
+  )
+  set_tests_properties(EmberDbCliCatalogTest.DeprecatesAwayTeam PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.MergesDuplicatePlayer
+    PASS_REGULAR_EXPRESSION "Catalog revision 19: deprecate team 2"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsCatalogLifecycle
     COMMAND emberdb_cli catalog list --review ${EMBERDB_CLI_CATALOG_REVIEW}
   )
-  set_tests_properties(EmberDbCliCatalogTest.ListsCatalog PROPERTIES
-    DEPENDS EmberDbCliCatalogTest.ListsRejectedTeamCandidate
-    PASS_REGULAR_EXPRESSION "player.StatsBomb:99.10"
+  set_tests_properties(EmberDbCliCatalogTest.ListsCatalogLifecycle PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.DeprecatesAwayTeam
+    PASS_REGULAR_EXPRESSION "player.11.Alex F..merged.10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsRemappedPlayer
+    COMMAND emberdb_cli catalog list --review ${EMBERDB_CLI_CATALOG_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ListsRemappedPlayer PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsCatalogLifecycle
+    PASS_REGULAR_EXPRESSION "player.Wyscout:25413.10"
+  )
+  add_test(
+    NAME EmberDbCliCatalogTest.ListsDeprecatedTeam
+    COMMAND emberdb_cli catalog list --review ${EMBERDB_CLI_CATALOG_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCatalogTest.ListsDeprecatedTeam PROPERTIES
+    DEPENDS EmberDbCliCatalogTest.ListsRemappedPlayer
+    PASS_REGULAR_EXPRESSION "team.2.Leicester City.deprecated.NULL"
   )
   add_test(
     NAME EmberDbCliCatalogTest.ListsHistory
     COMMAND emberdb_cli catalog history --review ${EMBERDB_CLI_CATALOG_REVIEW}
   )
   set_tests_properties(EmberDbCliCatalogTest.ListsHistory PROPERTIES
-    DEPENDS EmberDbCliCatalogTest.ListsCatalog
-    PASS_REGULAR_EXPRESSION "Catalog changes: 11"
+    DEPENDS EmberDbCliCatalogTest.ListsDeprecatedTeam
+    PASS_REGULAR_EXPRESSION "Catalog changes: 16"
   )
   add_test(
     NAME EmberDbCliCatalogTest.CleansReview
