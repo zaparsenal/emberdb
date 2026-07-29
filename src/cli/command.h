@@ -25,7 +25,12 @@ enum class Command {
   CatalogAdd,
   CatalogMap,
   CatalogList,
-  CatalogHistory
+  CatalogHistory,
+  EntityCandidateGenerate,
+  EntityCandidateList,
+  EntityCandidateInspect,
+  EntityCandidateAccept,
+  EntityCandidateReject
 };
 
 struct Options {

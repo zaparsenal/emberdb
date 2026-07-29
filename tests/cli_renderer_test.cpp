@@ -84,6 +84,40 @@ TEST(CliRendererTest, RendersCatalogSummaryAndAuditHistory) {
             std::string::npos);
 }
 
+TEST(CliRendererTest, RendersEntityCandidateEvidenceAndDecision) {
+  emberdb::EntityCandidateRecord candidate;
+  candidate.id = 7;
+  candidate.status = emberdb::MatchCandidateStatus::Accepted;
+  candidate.reconciliation = {
+      emberdb::IdentityEntityType::Player,
+      {"StatsBomb", "99", std::nullopt},
+      10,
+      "lineups.json",
+      {emberdb::ReconciliationStatus::Agreeing, "Alex Forward",
+       "Alex Forward"},
+      {emberdb::ReconciliationStatus::Missing, std::nullopt, std::nullopt},
+      1.0};
+  candidate.decision_provenance = emberdb::ReviewProvenance{
+      "reviewer", "provider profile", "Verified identity",
+      std::chrono::sys_seconds{std::chrono::seconds{1'700'000'000}}};
+  std::ostringstream inspection;
+  std::ostringstream accepted;
+
+  emberdb::cli::printEntityCandidateInspection(inspection, candidate);
+  emberdb::cli::printEntityCandidateAccepted(accepted, candidate);
+
+  EXPECT_NE(inspection.str().find(
+                "7\taccepted\tplayer\t1\tStatsBomb:99\t10"),
+            std::string::npos);
+  EXPECT_NE(inspection.str().find(
+                "name\tagreeing\tAlex Forward\tAlex Forward"),
+            std::string::npos);
+  EXPECT_NE(inspection.str().find("Decision source: provider profile"),
+            std::string::npos);
+  EXPECT_EQ(accepted.str(),
+            "Accepted entity candidate 7: player StatsBomb:99 -> 10\n");
+}
+
 TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   std::ostringstream output;
 
@@ -97,6 +131,10 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog init"), std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog history"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog candidates generate"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog candidates reject"),
             std::string::npos);
 }
 

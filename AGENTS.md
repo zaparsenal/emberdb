@@ -32,7 +32,8 @@ Provider metadata follows a separate path:
 - `include/emberdb/identity`, `src/identity`: canonical entity catalogs and mappings
 - `include/emberdb/ingestion`, `src/ingestion`: adapter contracts and implementations
 - `include/emberdb/reconciliation`, `src/reconciliation`: explainable cross-provider
-  candidate comparison without automatic identity mutation
+  match and provider-to-canonical entity candidate comparison without automatic
+  identity mutation
 - `include/emberdb/persistence`, `src/persistence`: versioned identity and reconciliation
   review persistence, separate from event-table storage
 - `include/emberdb/storage`, `src/storage`: columnar storage
@@ -121,6 +122,22 @@ Initialize and explicitly author a canonical identity review store with:
 ./build/emberdb_cli catalog map --review match-review.json \
   --entity team --canonical-id 1 --provider StatsBomb --provider-id 10 \
   --actor "reviewer@example.com" --source "StatsBomb teams" \
+  --reason "Verified provider identity"
+```
+
+Generate and review provider-to-canonical entity candidates:
+
+```bash
+./build/emberdb_cli catalog candidates generate \
+  --review match-review.json --entity player \
+  --provider statsbomb --input statsbomb-lineups.json
+./build/emberdb_cli catalog candidates list \
+  --review match-review.json --entity player --status unresolved
+./build/emberdb_cli catalog candidates inspect \
+  --review match-review.json --candidate-id 1
+./build/emberdb_cli catalog candidates accept \
+  --review match-review.json --candidate-id 1 \
+  --actor "reviewer@example.com" --source "provider profile" \
   --reason "Verified provider identity"
 ```
 

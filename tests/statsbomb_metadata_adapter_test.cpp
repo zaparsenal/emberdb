@@ -17,6 +17,8 @@ TEST(StatsBombMetadataAdapterTest, LoadsMatchTeamsAndReconciliationFields) {
   const auto metadata = adapter.loadMatches(fixture("statsbomb_matches.json"));
 
   ASSERT_EQ(metadata.matches.size(), 1U);
+  ASSERT_EQ(metadata.competitions.size(), 1U);
+  ASSERT_EQ(metadata.seasons.size(), 1U);
   ASSERT_EQ(metadata.teams.size(), 2U);
   const auto& match = metadata.matches[0];
   EXPECT_EQ(match.reference, (emberdb::ProviderMatchReference{"StatsBomb", "12345"}));
@@ -30,6 +32,14 @@ TEST(StatsBombMetadataAdapterTest, LoadsMatchTeamsAndReconciliationFields) {
                                  "StatsBomb", "20", std::nullopt}));
   EXPECT_EQ(match.home_score, 2);
   EXPECT_EQ(match.away_score, 1);
+  EXPECT_EQ(metadata.competitions[0].reference,
+            (emberdb::ProviderCompetitionReference{"StatsBomb", "2"}));
+  EXPECT_EQ(metadata.competitions[0].name, "Premier League");
+  EXPECT_EQ(metadata.seasons[0].reference,
+            (emberdb::ProviderSeasonReference{"StatsBomb", "44"}));
+  EXPECT_EQ(metadata.seasons[0].competition,
+            (emberdb::ProviderCompetitionReference{"StatsBomb", "2"}));
+  EXPECT_EQ(metadata.seasons[0].name, "2023/2024");
   const auto expected_kickoff =
       std::chrono::sys_days{std::chrono::year{2023} / 8 / 12} +
       std::chrono::hours{15};

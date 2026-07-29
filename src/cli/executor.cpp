@@ -21,6 +21,7 @@
 #include "emberdb/persistence/match_review_file.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
+#include "emberdb/reconciliation/entity_reconciliation.h"
 #include "emberdb/reconciliation/match_reconciliation.h"
 #include "emberdb/storage/football_event_file.h"
 #include "emberdb/storage/football_event_table.h"
@@ -66,15 +67,125 @@ ReviewProvenance reviewProvenance(const Options& options) {
               std::chrono::system_clock::now())};
 }
 
+IdentityEntityType identityEntityType(CatalogEntityType entity_type) {
+  switch (entity_type) {
+    case CatalogEntityType::Competition:
+      return IdentityEntityType::Competition;
+    case CatalogEntityType::Season:
+      return IdentityEntityType::Season;
+    case CatalogEntityType::Team:
+      return IdentityEntityType::Team;
+    case CatalogEntityType::Player:
+      return IdentityEntityType::Player;
+    case CatalogEntityType::Match:
+      throw std::runtime_error(
+          "Internal error: matches are not catalog entity candidates");
+  }
+  throw std::runtime_error("Internal error: unknown catalog entity type");
+}
+
+ProviderMetadata loadProviderEntities(
+    const std::string& provider, IdentityEntityType entity_type,
+    const std::filesystem::path& input) {
+  if (provider == "statsbomb") {
+    if (entity_type == IdentityEntityType::Player) {
+      return StatsBombMetadataAdapter{}.loadLineups(input);
+    }
+    return StatsBombMetadataAdapter{}.loadMatches(input);
+  }
+  if (provider == "wyscout") {
+    const WyscoutMetadataAdapter adapter;
+    switch (entity_type) {
+      case IdentityEntityType::Competition:
+        return adapter.loadCompetitions(input);
+      case IdentityEntityType::Season:
+        return adapter.loadMatches(input);
+      case IdentityEntityType::Team:
+        return adapter.loadTeams(input);
+      case IdentityEntityType::Player:
+        return adapter.loadPlayers(input);
+    }
+  }
+  throw std::runtime_error("Unsupported metadata provider '" + provider +
+                           "'; expected statsbomb or wyscout");
+}
+
+bool isEntityCandidateCommand(Command command) {
+  return command == Command::EntityCandidateGenerate ||
+         command == Command::EntityCandidateList ||
+         command == Command::EntityCandidateInspect ||
+         command == Command::EntityCandidateAccept ||
+         command == Command::EntityCandidateReject;
+}
+
 bool isCatalogCommand(Command command) {
   return command == Command::CatalogInit ||
          command == Command::CatalogAdd ||
          command == Command::CatalogMap ||
          command == Command::CatalogList ||
-         command == Command::CatalogHistory;
+         command == Command::CatalogHistory ||
+         isEntityCandidateCommand(command);
+}
+
+void runEntityCandidateCommand(const Options& options,
+                               std::ostream& output) {
+  auto store = loadMatchReviewStore(options.review);
+  const auto loaded_revision = store.revision();
+  if (options.command == Command::EntityCandidateGenerate) {
+    const auto entity_type = identityEntityType(*options.catalog_entity);
+    const auto metadata =
+        loadProviderEntities(options.provider, entity_type, options.input);
+    const auto generated = findEntityCandidates(
+        metadata, entity_type, store.catalog(), options.input.string());
+    const auto existing_count = store.entityCandidates().size();
+    const auto ids = store.addEntityCandidates(generated);
+    const auto added_count =
+        store.entityCandidates().size() - existing_count;
+    if (added_count != 0) {
+      saveMatchReviewStore(store, options.review, loaded_revision);
+    }
+    printEntityCandidateGeneration(output, generated.size(), added_count, ids);
+    return;
+  }
+  if (options.command == Command::EntityCandidateList) {
+    const auto entity_type =
+        options.catalog_entity
+            ? std::optional<IdentityEntityType>{
+                  identityEntityType(*options.catalog_entity)}
+            : std::nullopt;
+    printEntityCandidateList(
+        output,
+        store.entityCandidates(options.candidate_status, entity_type));
+    return;
+  }
+  const auto* candidate = store.entityCandidate(options.candidate_id);
+  if (candidate == nullptr) {
+    throw std::runtime_error(
+        "Unknown entity candidate " +
+        std::to_string(options.candidate_id));
+  }
+  if (options.command == Command::EntityCandidateInspect) {
+    printEntityCandidateInspection(output, *candidate);
+    return;
+  }
+  const auto provenance = reviewProvenance(options);
+  if (options.command == Command::EntityCandidateAccept) {
+    store.acceptEntityCandidate(options.candidate_id, provenance);
+    saveMatchReviewStore(store, options.review, loaded_revision);
+    printEntityCandidateAccepted(output, *store.entityCandidate(
+                                             options.candidate_id));
+    return;
+  }
+  store.rejectEntityCandidate(options.candidate_id, provenance);
+  saveMatchReviewStore(store, options.review, loaded_revision);
+  printEntityCandidateRejected(output, options.candidate_id, options.reason);
 }
 
 void runCatalogCommand(const Options& options, std::ostream& output) {
+  if (isEntityCandidateCommand(options.command)) {
+    runEntityCandidateCommand(options, output);
+    return;
+  }
   if (options.command == Command::CatalogInit) {
     const MatchReviewStore store;
     createMatchReviewStore(store, options.review);

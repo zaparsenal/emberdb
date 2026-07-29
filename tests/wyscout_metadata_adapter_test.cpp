@@ -21,7 +21,8 @@ TEST(WyscoutMetadataAdapterTest, LoadsCompetitionTeamsAndPlayers) {
   const auto players = adapter.loadPlayers(fixture("wyscout_players.json"));
 
   ASSERT_EQ(competitions.competitions.size(), 1U);
-  EXPECT_EQ(competitions.competitions[0].id, "364");
+  EXPECT_EQ(competitions.competitions[0].reference,
+            (emberdb::ProviderCompetitionReference{"Wyscout", "364"}));
   EXPECT_EQ(competitions.competitions[0].name, "English first division");
   ASSERT_EQ(teams.teams.size(), 2U);
   EXPECT_EQ(teams.teams[0].reference,
@@ -42,6 +43,7 @@ TEST(WyscoutMetadataAdapterTest, LoadsMatchSidesScoresAndUtcKickoff) {
   const auto metadata = adapter.loadMatches(fixture("wyscout_matches.json"));
 
   ASSERT_EQ(metadata.matches.size(), 1U);
+  ASSERT_EQ(metadata.seasons.size(), 1U);
   const auto& match = metadata.matches[0];
   EXPECT_EQ(match.reference,
             (emberdb::ProviderMatchReference{"Wyscout", "2499719"}));
@@ -55,6 +57,11 @@ TEST(WyscoutMetadataAdapterTest, LoadsMatchSidesScoresAndUtcKickoff) {
             (emberdb::ProviderTeamReference{"Wyscout", "1631", std::nullopt}));
   EXPECT_EQ(match.home_score, 4);
   EXPECT_EQ(match.away_score, 3);
+  EXPECT_EQ(metadata.seasons[0].reference,
+            (emberdb::ProviderSeasonReference{"Wyscout", "181150"}));
+  EXPECT_EQ(metadata.seasons[0].competition,
+            (emberdb::ProviderCompetitionReference{"Wyscout", "364"}));
+  EXPECT_FALSE(metadata.seasons[0].name);
   const auto expected_kickoff =
       std::chrono::sys_days{std::chrono::year{2017} / 8 / 11} +
       std::chrono::hours{18} + std::chrono::minutes{45};
