@@ -47,6 +47,15 @@ Json providerMatchJson(const ProviderMatchReference& reference) {
   return {{"provider", reference.provider}, {"id", reference.id}};
 }
 
+Json providerCompetitionJson(
+    const ProviderCompetitionReference& reference) {
+  return {{"provider", reference.provider}, {"id", reference.id}};
+}
+
+Json providerSeasonJson(const ProviderSeasonReference& reference) {
+  return {{"provider", reference.provider}, {"id", reference.id}};
+}
+
 Json providerTeamJson(const ProviderTeamReference& reference) {
   return {{"provider", reference.provider},
           {"id", reference.id},
@@ -83,12 +92,26 @@ Json evidenceJson(const MatchFieldEvidence& evidence) {
 }
 
 Json catalogJson(const CanonicalIdentityCatalog& catalog) {
-  Json result = {{"teams", Json::array()},
+  Json result = {{"competitions", Json::array()},
+                 {"seasons", Json::array()},
+                 {"teams", Json::array()},
                  {"players", Json::array()},
                  {"matches", Json::array()},
+                 {"competition_mappings", Json::array()},
+                 {"season_mappings", Json::array()},
                  {"team_mappings", Json::array()},
                  {"player_mappings", Json::array()},
                  {"match_mappings", Json::array()}};
+  for (const auto& [id, competition] : catalog.competitions()) {
+    result["competitions"].push_back(
+        {{"id", id.value}, {"name", competition.name}});
+  }
+  for (const auto& [id, season] : catalog.seasons()) {
+    result["seasons"].push_back(
+        {{"id", id.value},
+         {"competition_id", season.competition_id.value},
+         {"name", season.name}});
+  }
   for (const auto& [id, team] : catalog.teams()) {
     result["teams"].push_back({{"id", id.value}, {"name", team.name}});
   }
@@ -107,6 +130,16 @@ Json catalogJson(const CanonicalIdentityCatalog& catalog) {
          {"away_team_id", match.away_team_id.value},
          {"home_score", match.home_score ? Json(*match.home_score) : Json(nullptr)},
          {"away_score", match.away_score ? Json(*match.away_score) : Json(nullptr)}});
+  }
+  for (const auto& [reference, id] : catalog.competitionMappings()) {
+    auto mapping = providerCompetitionJson(reference);
+    mapping["canonical_id"] = id.value;
+    result["competition_mappings"].push_back(std::move(mapping));
+  }
+  for (const auto& [reference, id] : catalog.seasonMappings()) {
+    auto mapping = providerSeasonJson(reference);
+    mapping["canonical_id"] = id.value;
+    result["season_mappings"].push_back(std::move(mapping));
   }
   for (const auto& [reference, id] : catalog.teamMappings()) {
     auto mapping = providerTeamJson(reference);
@@ -166,6 +199,16 @@ ProviderMatchReference readProviderMatch(const Json& value) {
   return {value.at("provider").get<std::string>(), value.at("id").get<std::string>()};
 }
 
+ProviderCompetitionReference readProviderCompetition(const Json& value) {
+  return {value.at("provider").get<std::string>(),
+          value.at("id").get<std::string>()};
+}
+
+ProviderSeasonReference readProviderSeason(const Json& value) {
+  return {value.at("provider").get<std::string>(),
+          value.at("id").get<std::string>()};
+}
+
 ProviderTeamReference readProviderTeam(const Json& value) {
   return {value.at("provider").get<std::string>(), value.at("id").get<std::string>(),
           readOptionalString(value, "match_id")};
@@ -200,8 +243,22 @@ MatchFieldEvidence readEvidence(const Json& value) {
           readOptionalString(value, "canonical_value")};
 }
 
-CanonicalIdentityCatalog readCatalog(const Json& value) {
+CanonicalIdentityCatalog readCatalog(const Json& value,
+                                     std::uint32_t format_version) {
   CanonicalIdentityCatalog catalog;
+  if (format_version >= 2) {
+    for (const auto& competition : value.at("competitions")) {
+      catalog.addCompetition(
+          {{competition.at("id").get<Identifier>()},
+           competition.at("name").get<std::string>()});
+    }
+    for (const auto& season : value.at("seasons")) {
+      catalog.addSeason(
+          {{season.at("id").get<Identifier>()},
+           {season.at("competition_id").get<Identifier>()},
+           season.at("name").get<std::string>()});
+    }
+  }
   for (const auto& team : value.at("teams")) {
     catalog.addTeam({{team.at("id").get<Identifier>()},
                      team.at("name").get<std::string>()});
@@ -227,6 +284,17 @@ CanonicalIdentityCatalog readCatalog(const Json& value) {
          {match.at("away_team_id").get<Identifier>()},
          readOptionalNumber<std::int32_t>(match, "home_score"),
          readOptionalNumber<std::int32_t>(match, "away_score")});
+  }
+  if (format_version >= 2) {
+    for (const auto& mapping : value.at("competition_mappings")) {
+      catalog.mapCompetition(
+          readProviderCompetition(mapping),
+          {mapping.at("canonical_id").get<Identifier>()});
+    }
+    for (const auto& mapping : value.at("season_mappings")) {
+      catalog.mapSeason(readProviderSeason(mapping),
+                        {mapping.at("canonical_id").get<Identifier>()});
+    }
   }
   for (const auto& mapping : value.at("team_mappings")) {
     catalog.mapTeam(readProviderTeam(mapping),
@@ -323,10 +391,10 @@ MatchReviewStore loadMatchReviewStore(const std::filesystem::path& path) {
       invalidFile(path, "format marker is not recognized");
     }
     const auto version = document.at("version").get<std::uint32_t>();
-    if (version != kMatchReviewFileFormatVersion) {
+    if (version != 1 && version != kMatchReviewFileFormatVersion) {
       invalidFile(path, "unsupported format version " + std::to_string(version));
     }
-    auto catalog = readCatalog(document.at("catalog"));
+    auto catalog = readCatalog(document.at("catalog"), version);
     std::vector<MatchCandidateRecord> candidates;
     for (const auto& candidate : document.at("candidates")) {
       candidates.push_back(readCandidate(candidate));

@@ -27,6 +27,27 @@ struct CanonicalMatchId {
   auto operator<=>(const CanonicalMatchId&) const = default;
 };
 
+struct CanonicalCompetitionId {
+  Identifier value{};
+  auto operator<=>(const CanonicalCompetitionId&) const = default;
+};
+
+struct CanonicalSeasonId {
+  Identifier value{};
+  auto operator<=>(const CanonicalSeasonId&) const = default;
+};
+
+struct CanonicalCompetition {
+  CanonicalCompetitionId id;
+  std::string name;
+};
+
+struct CanonicalSeason {
+  CanonicalSeasonId id;
+  CanonicalCompetitionId competition_id;
+  std::string name;
+};
+
 struct CanonicalTeam {
   CanonicalTeamId id;
   std::string name;
@@ -53,6 +74,24 @@ struct ProviderMatchReference {
   std::string id;
   bool operator==(const ProviderMatchReference&) const = default;
   bool operator<(const ProviderMatchReference& other) const {
+    return std::tie(provider, id) < std::tie(other.provider, other.id);
+  }
+};
+
+struct ProviderCompetitionReference {
+  std::string provider;
+  std::string id;
+  bool operator==(const ProviderCompetitionReference&) const = default;
+  bool operator<(const ProviderCompetitionReference& other) const {
+    return std::tie(provider, id) < std::tie(other.provider, other.id);
+  }
+};
+
+struct ProviderSeasonReference {
+  std::string provider;
+  std::string id;
+  bool operator==(const ProviderSeasonReference&) const = default;
+  bool operator<(const ProviderSeasonReference& other) const {
     return std::tie(provider, id) < std::tie(other.provider, other.id);
   }
 };
@@ -89,10 +128,16 @@ struct CanonicalEventIdentity {
 
 class CanonicalIdentityCatalog {
  public:
+  void addCompetition(CanonicalCompetition competition);
+  void addSeason(CanonicalSeason season);
   void addTeam(CanonicalTeam team);
   void addPlayer(CanonicalPlayer player);
   void addMatch(CanonicalMatch match);
 
+  void mapCompetition(ProviderCompetitionReference provider_competition,
+                      CanonicalCompetitionId canonical_competition);
+  void mapSeason(ProviderSeasonReference provider_season,
+                 CanonicalSeasonId canonical_season);
   void mapTeam(ProviderTeamReference provider_team, CanonicalTeamId canonical_team);
   void mapPlayer(ProviderPlayerReference provider_player,
                  CanonicalPlayerId canonical_player);
@@ -100,10 +145,17 @@ class CanonicalIdentityCatalog {
   void mapMetricaTeams(std::string provider_match_id, CanonicalTeamId home_team,
                        CanonicalTeamId away_team);
 
+  [[nodiscard]] const CanonicalCompetition* competition(
+      CanonicalCompetitionId id) const;
+  [[nodiscard]] const CanonicalSeason* season(CanonicalSeasonId id) const;
   [[nodiscard]] const CanonicalTeam* team(CanonicalTeamId id) const;
   [[nodiscard]] const CanonicalPlayer* player(CanonicalPlayerId id) const;
   [[nodiscard]] const CanonicalMatch* match(CanonicalMatchId id) const;
 
+  [[nodiscard]] std::optional<CanonicalCompetitionId> resolveCompetition(
+      const ProviderCompetitionReference& provider_competition) const;
+  [[nodiscard]] std::optional<CanonicalSeasonId> resolveSeason(
+      const ProviderSeasonReference& provider_season) const;
   [[nodiscard]] std::optional<CanonicalTeamId> resolveTeam(
       const ProviderTeamReference& provider_team) const;
   [[nodiscard]] std::optional<CanonicalPlayerId> resolvePlayer(
@@ -113,12 +165,21 @@ class CanonicalIdentityCatalog {
   [[nodiscard]] CanonicalEventIdentity resolveEvent(
       const FootballEvent& event) const;
 
+  [[nodiscard]] const std::map<CanonicalCompetitionId, CanonicalCompetition>&
+  competitions() const noexcept;
+  [[nodiscard]] const std::map<CanonicalSeasonId, CanonicalSeason>& seasons()
+      const noexcept;
   [[nodiscard]] const std::map<CanonicalTeamId, CanonicalTeam>& teams() const
       noexcept;
   [[nodiscard]] const std::map<CanonicalPlayerId, CanonicalPlayer>& players() const
       noexcept;
   [[nodiscard]] const std::map<CanonicalMatchId, CanonicalMatch>& matches() const
       noexcept;
+  [[nodiscard]] const std::map<ProviderCompetitionReference,
+                               CanonicalCompetitionId>&
+  competitionMappings() const noexcept;
+  [[nodiscard]] const std::map<ProviderSeasonReference, CanonicalSeasonId>&
+  seasonMappings() const noexcept;
   [[nodiscard]] const std::map<ProviderTeamReference, CanonicalTeamId>&
   teamMappings() const noexcept;
   [[nodiscard]] const std::map<ProviderPlayerReference, CanonicalPlayerId>&
@@ -127,9 +188,14 @@ class CanonicalIdentityCatalog {
   matchMappings() const noexcept;
 
  private:
+  std::map<CanonicalCompetitionId, CanonicalCompetition> competitions_;
+  std::map<CanonicalSeasonId, CanonicalSeason> seasons_;
   std::map<CanonicalTeamId, CanonicalTeam> teams_;
   std::map<CanonicalPlayerId, CanonicalPlayer> players_;
   std::map<CanonicalMatchId, CanonicalMatch> matches_;
+  std::map<ProviderCompetitionReference, CanonicalCompetitionId>
+      competition_mappings_;
+  std::map<ProviderSeasonReference, CanonicalSeasonId> season_mappings_;
   std::map<ProviderTeamReference, CanonicalTeamId> team_mappings_;
   std::map<ProviderPlayerReference, CanonicalPlayerId> player_mappings_;
   std::map<ProviderMatchReference, CanonicalMatchId> match_mappings_;

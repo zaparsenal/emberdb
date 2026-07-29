@@ -44,6 +44,32 @@ std::optional<CanonicalId> resolve(
 
 }  // namespace
 
+void CanonicalIdentityCatalog::addCompetition(
+    CanonicalCompetition competition) {
+  requirePositive(competition.id, "canonical competition ID");
+  if (competition.name.empty()) {
+    throw std::invalid_argument(
+        "canonical competition name must not be empty");
+  }
+  if (!competitions_.emplace(competition.id, std::move(competition)).second) {
+    throw std::invalid_argument("duplicate canonical competition ID");
+  }
+}
+
+void CanonicalIdentityCatalog::addSeason(CanonicalSeason season) {
+  requirePositive(season.id, "canonical season ID");
+  if (!competitions_.contains(season.competition_id)) {
+    throw std::invalid_argument(
+        "canonical season competition must already exist in the catalog");
+  }
+  if (season.name.empty()) {
+    throw std::invalid_argument("canonical season name must not be empty");
+  }
+  if (!seasons_.emplace(season.id, std::move(season)).second) {
+    throw std::invalid_argument("duplicate canonical season ID");
+  }
+}
+
 void CanonicalIdentityCatalog::addTeam(CanonicalTeam team) {
   requirePositive(team.id, "canonical team ID");
   if (team.name.empty()) {
@@ -88,6 +114,29 @@ void CanonicalIdentityCatalog::addMatch(CanonicalMatch match) {
   }
 }
 
+void CanonicalIdentityCatalog::mapCompetition(
+    ProviderCompetitionReference provider_competition,
+    CanonicalCompetitionId canonical_competition) {
+  requireProviderReference(provider_competition.provider,
+                           provider_competition.id);
+  if (!competitions_.contains(canonical_competition)) {
+    throw std::invalid_argument(
+        "cannot map an unknown canonical competition ID");
+  }
+  addMapping(competition_mappings_, std::move(provider_competition),
+             canonical_competition);
+}
+
+void CanonicalIdentityCatalog::mapSeason(
+    ProviderSeasonReference provider_season,
+    CanonicalSeasonId canonical_season) {
+  requireProviderReference(provider_season.provider, provider_season.id);
+  if (!seasons_.contains(canonical_season)) {
+    throw std::invalid_argument("cannot map an unknown canonical season ID");
+  }
+  addMapping(season_mappings_, std::move(provider_season), canonical_season);
+}
+
 void CanonicalIdentityCatalog::mapTeam(ProviderTeamReference provider_team,
                                        CanonicalTeamId canonical_team) {
   requireProviderReference(provider_team.provider, provider_team.id);
@@ -125,6 +174,18 @@ void CanonicalIdentityCatalog::mapMetricaTeams(std::string provider_match_id,
   mapTeam({"Metrica", "Away", std::move(provider_match_id)}, away_team);
 }
 
+const CanonicalCompetition* CanonicalIdentityCatalog::competition(
+    CanonicalCompetitionId id) const {
+  const auto position = competitions_.find(id);
+  return position == competitions_.end() ? nullptr : &position->second;
+}
+
+const CanonicalSeason* CanonicalIdentityCatalog::season(
+    CanonicalSeasonId id) const {
+  const auto position = seasons_.find(id);
+  return position == seasons_.end() ? nullptr : &position->second;
+}
+
 const CanonicalTeam* CanonicalIdentityCatalog::team(CanonicalTeamId id) const {
   const auto position = teams_.find(id);
   return position == teams_.end() ? nullptr : &position->second;
@@ -138,6 +199,17 @@ const CanonicalPlayer* CanonicalIdentityCatalog::player(CanonicalPlayerId id) co
 const CanonicalMatch* CanonicalIdentityCatalog::match(CanonicalMatchId id) const {
   const auto position = matches_.find(id);
   return position == matches_.end() ? nullptr : &position->second;
+}
+
+std::optional<CanonicalCompetitionId>
+CanonicalIdentityCatalog::resolveCompetition(
+    const ProviderCompetitionReference& provider_competition) const {
+  return resolve(competition_mappings_, provider_competition);
+}
+
+std::optional<CanonicalSeasonId> CanonicalIdentityCatalog::resolveSeason(
+    const ProviderSeasonReference& provider_season) const {
+  return resolve(season_mappings_, provider_season);
 }
 
 std::optional<CanonicalTeamId> CanonicalIdentityCatalog::resolveTeam(
@@ -178,6 +250,16 @@ CanonicalEventIdentity CanonicalIdentityCatalog::resolveEvent(
   return result;
 }
 
+const std::map<CanonicalCompetitionId, CanonicalCompetition>&
+CanonicalIdentityCatalog::competitions() const noexcept {
+  return competitions_;
+}
+
+const std::map<CanonicalSeasonId, CanonicalSeason>&
+CanonicalIdentityCatalog::seasons() const noexcept {
+  return seasons_;
+}
+
 const std::map<CanonicalTeamId, CanonicalTeam>&
 CanonicalIdentityCatalog::teams() const noexcept {
   return teams_;
@@ -191,6 +273,16 @@ CanonicalIdentityCatalog::players() const noexcept {
 const std::map<CanonicalMatchId, CanonicalMatch>&
 CanonicalIdentityCatalog::matches() const noexcept {
   return matches_;
+}
+
+const std::map<ProviderCompetitionReference, CanonicalCompetitionId>&
+CanonicalIdentityCatalog::competitionMappings() const noexcept {
+  return competition_mappings_;
+}
+
+const std::map<ProviderSeasonReference, CanonicalSeasonId>&
+CanonicalIdentityCatalog::seasonMappings() const noexcept {
+  return season_mappings_;
 }
 
 const std::map<ProviderTeamReference, CanonicalTeamId>&

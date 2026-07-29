@@ -28,12 +28,18 @@ class MatchReviewFileTest : public ::testing::Test {
 
   emberdb::MatchReviewStore store() const {
     emberdb::CanonicalIdentityCatalog catalog;
+    catalog.addCompetition({{20}, "Premier League"});
+    catalog.addSeason({{30}, {20}, "2017/2018"});
     catalog.addTeam({{1}, "Arsenal"});
     catalog.addTeam({{2}, "Leicester City"});
     catalog.addPlayer({{10}, "Alex Forward"});
     catalog.addMatch({{100}, "Premier League", "2017/2018",
                       std::chrono::sys_seconds{std::chrono::seconds{1'500'000'000}},
                       {1}, {2}, 4, 3});
+    catalog.mapCompetition({"StatsBomb", "2"}, {20});
+    catalog.mapCompetition({"Wyscout", "364"}, {20});
+    catalog.mapSeason({"StatsBomb", "44"}, {30});
+    catalog.mapSeason({"Wyscout", "181150"}, {30});
     catalog.mapTeam({"StatsBomb", "10", std::nullopt}, {1});
     catalog.mapTeam({"StatsBomb", "20", std::nullopt}, {2});
     catalog.mapTeam({"Wyscout", "1609", std::nullopt}, {1});
@@ -73,10 +79,16 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   emberdb::saveMatchReviewStore(original, path_);
   const auto loaded = emberdb::loadMatchReviewStore(path_);
 
+  EXPECT_EQ(loaded.catalog().competitions().size(), 1U);
+  EXPECT_EQ(loaded.catalog().seasons().size(), 1U);
   EXPECT_EQ(loaded.catalog().teams().size(), 2U);
   EXPECT_EQ(loaded.catalog().players().size(), 1U);
   EXPECT_EQ(loaded.catalog().matches().size(), 1U);
   EXPECT_EQ(loaded.catalog().playerMappings().begin()->first.match_id, "match-1");
+  EXPECT_EQ(loaded.catalog().resolveCompetition({"Wyscout", "364"}),
+            emberdb::CanonicalCompetitionId{20});
+  EXPECT_EQ(loaded.catalog().resolveSeason({"StatsBomb", "44"}),
+            emberdb::CanonicalSeasonId{30});
   EXPECT_EQ(loaded.catalog().resolveMatch({"StatsBomb", "12345"}),
             emberdb::CanonicalMatchId{100});
   ASSERT_EQ(loaded.candidates().size(), 3U);
