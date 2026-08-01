@@ -865,11 +865,11 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 - The Wyscout event CLI reads the open 2019 research export only and does not
   automatically join the separately supported player, team, competition, or match
   metadata files.
-- Catalog authoring is intentionally one explicit entity or mapping per command. There
-  is no bulk canonical manifest import, reactivation, or automatic alias discovery.
+- Canonical manifest v1 supports atomic additions and mappings, but not lifecycle
+  operations, reactivation, lossless catalog export, or automatic alias discovery.
 - Catalog validation reports one provider metadata export and entity kind per command;
-  they measure exact normalized-name and mapping coverage but do not import a canonical
-  manifest or create candidate decisions.
+  it does not yet aggregate multiple entity kinds, emit machine-readable threshold
+  results, or measure identity resolution across normalized football events.
 - Entity candidates use exact normalized names only. They do not perform fuzzy matching,
   aliases, transliteration, or automatic acceptance, and the open Wyscout match metadata
   cannot generate season candidates without names.
@@ -882,12 +882,17 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The recommended next milestone is a small canonical-manifest importer built on the
-validation and audited catalog APIs. It should define a versioned JSON schema, validate
-an entire batch atomically, report duplicate IDs, mapping collisions, parent-reference
-errors, and lifecycle conflicts in a deterministic dry run, and require per-change
-provenance before committing. It should not create fuzzy aliases or automatic identity
-decisions. Event reconciliation should remain deferred until these identities have been
-exercised on representative provider catalogs. SQL is also deliberately deferred; when
-resumed, it should translate into the existing typed operations rather than bypassing
-them.
+The next phase connects audited canonical identity to event analytics without rewriting
+provider IDs. First, canonical matches should reference typed season ancestry instead of
+duplicated competition and season labels. In parallel, read-only event identity coverage
+should exercise real mappings, while the query engine gains a shared row-selection
+foundation and reproducible performance baselines. Canonical IDs can then become virtual
+query columns tied to a catalog revision, followed by multi-match import and selected-
+column file scans.
+
+Lossless catalog export and manifest lifecycle operations should wait until typed match
+ancestry and audit semantics can represent them faithfully. SQL remains deliberately
+deferred; when resumed, its parser and planner must translate into the existing typed
+operations rather than bypassing them. Fuzzy identity, automatic acceptance, new
+providers, compression, and hardware-specific execution also remain out of scope until
+explicit milestones justify them.
