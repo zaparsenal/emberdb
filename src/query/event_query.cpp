@@ -8,18 +8,110 @@
 #include "emberdb/storage/football_event_table.h"
 
 namespace emberdb {
+namespace {
 
-EqualityPredicate::EqualityPredicate(FootballEventColumn column, FootballEventValue value)
-    : column_(column), value_(std::move(value)) {
-  if (columnValueType(column_) != valueType(value_)) {
+bool isNullOperator(FilterOperator operation) noexcept {
+  return operation == FilterOperator::IsNull ||
+         operation == FilterOperator::IsNotNull;
+}
+
+bool isComparisonOperator(FilterOperator operation) noexcept {
+  switch (operation) {
+    case FilterOperator::Equal:
+    case FilterOperator::NotEqual:
+    case FilterOperator::Less:
+    case FilterOperator::LessOrEqual:
+    case FilterOperator::Greater:
+    case FilterOperator::GreaterOrEqual:
+      return true;
+    case FilterOperator::IsNull:
+    case FilterOperator::IsNotNull:
+      return false;
+  }
+  return false;
+}
+
+bool matches(const FootballEventCell& cell, const EventPredicate& predicate) {
+  if (predicate.operation() == FilterOperator::IsNull) {
+    return !cell;
+  }
+  if (predicate.operation() == FilterOperator::IsNotNull) {
+    return cell.has_value();
+  }
+  if (!cell) {
+    return false;
+  }
+
+  const auto& operand = *predicate.operand();
+  switch (predicate.operation()) {
+    case FilterOperator::Equal:
+      return *cell == operand;
+    case FilterOperator::NotEqual:
+      return *cell != operand;
+    case FilterOperator::Less:
+      return *cell < operand;
+    case FilterOperator::LessOrEqual:
+      return *cell < operand || *cell == operand;
+    case FilterOperator::Greater:
+      return operand < *cell;
+    case FilterOperator::GreaterOrEqual:
+      return operand < *cell || *cell == operand;
+    case FilterOperator::IsNull:
+    case FilterOperator::IsNotNull:
+      break;
+  }
+  return false;
+}
+
+}  // namespace
+
+EventPredicate::EventPredicate(FootballEventColumn column,
+                               FootballEventValue value)
+    : EventPredicate(column, FilterOperator::Equal, std::move(value)) {}
+
+EventPredicate::EventPredicate(FootballEventColumn column,
+                               FilterOperator operation,
+                               FootballEventValue value)
+    : column_(column), operation_(operation), operand_(std::move(value)) {
+  if (isNullOperator(operation_)) {
+    throw std::invalid_argument("Null filter for column '" +
+                                std::string(columnName(column_)) +
+                                "' must not have a value");
+  }
+  if (!isComparisonOperator(operation_)) {
+    throw std::invalid_argument("Unsupported filter operation for column '" +
+                                std::string(columnName(column_)) + "'");
+  }
+  if (columnValueType(column_) != valueType(*operand_)) {
     throw std::invalid_argument("Filter value has the wrong type for column '" +
                                 std::string(columnName(column_)) + "'");
   }
 }
 
-FootballEventColumn EqualityPredicate::column() const noexcept { return column_; }
+EventPredicate::EventPredicate(FootballEventColumn column,
+                               FilterOperator operation)
+    : column_(column), operation_(operation) {
+  if (!isNullOperator(operation_)) {
+    throw std::invalid_argument("Comparison filter for column '" +
+                                std::string(columnName(column_)) +
+                                "' requires a value");
+  }
+}
 
-const FootballEventValue& EqualityPredicate::value() const noexcept { return value_; }
+FootballEventColumn EventPredicate::column() const noexcept { return column_; }
+
+FilterOperator EventPredicate::operation() const noexcept { return operation_; }
+
+const std::optional<FootballEventValue>& EventPredicate::operand() const noexcept {
+  return operand_;
+}
+
+const FootballEventValue& EventPredicate::value() const {
+  if (!operand_) {
+    throw std::logic_error("Null filter does not have a value");
+  }
+  return *operand_;
+}
 
 EventQueryResult::EventQueryResult(std::vector<FootballEventColumn> columns,
                                    std::vector<std::vector<FootballEventCell>> rows)
@@ -47,6 +139,34 @@ const FootballEventCell& EventQueryResult::cell(std::size_t row,
   return rows_[row][column];
 }
 
+std::vector<std::size_t> selectRows(const FootballEventTable& table,
+                                    const RowSelection& selection) {
+  std::vector<std::size_t> rows;
+  const auto capacity = selection.limit
+                            ? std::min(table.rowCount(), *selection.limit)
+                            : table.rowCount();
+  rows.reserve(capacity);
+  if (selection.limit && *selection.limit == 0) {
+    return rows;
+  }
+
+  for (std::size_t row = 0; row < table.rowCount(); ++row) {
+    const bool selected = std::all_of(
+        selection.filters.begin(), selection.filters.end(),
+        [&](const EventPredicate& filter) {
+          return matches(table.cell(filter.column(), row), filter);
+        });
+    if (!selected) {
+      continue;
+    }
+    rows.push_back(row);
+    if (selection.limit && rows.size() == *selection.limit) {
+      break;
+    }
+  }
+  return rows;
+}
+
 EventQueryResult executeQuery(const FootballEventTable& table, const EventQuery& query) {
   if (query.projection.empty()) {
     throw std::invalid_argument("A query projection must contain at least one column");
@@ -62,17 +182,9 @@ EventQueryResult executeQuery(const FootballEventTable& table, const EventQuery&
   }
 
   std::vector<std::vector<FootballEventCell>> rows;
-  rows.reserve(table.rowCount());
-  for (std::size_t row = 0; row < table.rowCount(); ++row) {
-    const bool matches = std::all_of(
-        query.filters.begin(), query.filters.end(), [&](const EqualityPredicate& filter) {
-          const auto value = table.cell(filter.column(), row);
-          return value && *value == filter.value();
-        });
-    if (!matches) {
-      continue;
-    }
-
+  const auto selected_rows = selectRows(table, {query.filters, query.limit});
+  rows.reserve(selected_rows.size());
+  for (const auto row : selected_rows) {
     std::vector<FootballEventCell> projected_row;
     projected_row.reserve(query.projection.size());
     for (const auto column : query.projection) {

@@ -168,17 +168,25 @@ Json catalogJson(const CanonicalIdentityCatalog& catalog) {
          {"merged_into", optionalIdentifier(player.merged_into)}});
   }
   for (const auto& [id, match] : catalog.matches()) {
-    result["matches"].push_back(
+    Json serialized =
         {{"id", id.value},
-         {"competition", match.competition},
-         {"season", match.season},
          {"kickoff_seconds",
           match.kickoff ? Json(match.kickoff->time_since_epoch().count())
                         : Json(nullptr)},
          {"home_team_id", match.home_team_id.value},
          {"away_team_id", match.away_team_id.value},
          {"home_score", match.home_score ? Json(*match.home_score) : Json(nullptr)},
-         {"away_score", match.away_score ? Json(*match.away_score) : Json(nullptr)}});
+         {"away_score", match.away_score ? Json(*match.away_score) : Json(nullptr)}};
+    if (match.season_id) {
+      serialized["season_id"] = match.season_id->value;
+    } else if (match.legacy_ancestry) {
+      serialized["legacy_ancestry"] =
+          {{"competition", match.legacy_ancestry->competition},
+           {"season", match.legacy_ancestry->season}};
+    } else {
+      throw std::logic_error("canonical match has no ancestry");
+    }
+    result["matches"].push_back(std::move(serialized));
   }
   for (const auto& [reference, id] : catalog.competitionMappings()) {
     auto mapping = providerCompetitionJson(reference);
@@ -434,15 +442,69 @@ CanonicalIdentityCatalog readCatalog(const Json& value,
                                    std::chrono::sys_seconds{
                                        std::chrono::seconds{*kickoff_count}}}
                              : std::nullopt;
-    catalog.addMatch(
-        {{match.at("id").get<Identifier>()},
-         match.at("competition").get<std::string>(),
-         match.at("season").get<std::string>(),
-         kickoff,
-         {match.at("home_team_id").get<Identifier>()},
-         {match.at("away_team_id").get<Identifier>()},
-         readOptionalNumber<std::int32_t>(match, "home_score"),
-         readOptionalNumber<std::int32_t>(match, "away_score")});
+    const auto id = CanonicalMatchId{match.at("id").get<Identifier>()};
+    const auto home_team =
+        CanonicalTeamId{match.at("home_team_id").get<Identifier>()};
+    const auto away_team =
+        CanonicalTeamId{match.at("away_team_id").get<Identifier>()};
+    const auto home_score =
+        readOptionalNumber<std::int32_t>(match, "home_score");
+    const auto away_score =
+        readOptionalNumber<std::int32_t>(match, "away_score");
+    if (format_version >= 5) {
+      const auto has_typed_ancestry =
+          match.contains("season_id") && !match.at("season_id").is_null();
+      const auto has_legacy_ancestry =
+          match.contains("legacy_ancestry") &&
+          !match.at("legacy_ancestry").is_null();
+      if (has_typed_ancestry == has_legacy_ancestry) {
+        throw std::invalid_argument(
+            "canonical match must contain exactly one typed or legacy ancestry");
+      }
+      if (has_typed_ancestry) {
+        catalog.addMatch(
+            {id,
+             {match.at("season_id").get<Identifier>()},
+             kickoff,
+             home_team,
+             away_team,
+             home_score,
+             away_score});
+      } else {
+        const auto& ancestry = match.at("legacy_ancestry");
+        catalog.restoreLegacyMatch(CanonicalMatch::legacy(
+            id,
+            {ancestry.at("competition").get<std::string>(),
+             ancestry.at("season").get<std::string>()},
+            kickoff, home_team, away_team, home_score, away_score));
+      }
+      continue;
+    }
+
+    const auto competition_name =
+        match.at("competition").get<std::string>();
+    const auto season_name = match.at("season").get<std::string>();
+    std::optional<CanonicalSeasonId> inferred_season;
+    bool ambiguous{};
+    for (const auto& [season_id, season] : catalog.seasons()) {
+      const auto* competition = catalog.competition(season.competition_id);
+      if (competition != nullptr && competition->name == competition_name &&
+          season.name == season_name) {
+        if (inferred_season) {
+          ambiguous = true;
+          break;
+        }
+        inferred_season = season_id;
+      }
+    }
+    if (inferred_season && !ambiguous) {
+      catalog.addMatch({id, *inferred_season, kickoff, home_team, away_team,
+                        home_score, away_score});
+    } else {
+      catalog.restoreLegacyMatch(CanonicalMatch::legacy(
+          id, {competition_name, season_name}, kickoff, home_team, away_team,
+          home_score, away_score));
+    }
   }
   if (format_version >= 2) {
     for (const auto& mapping : value.at("competition_mappings")) {

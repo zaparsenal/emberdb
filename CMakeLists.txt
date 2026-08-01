@@ -39,6 +39,7 @@ add_library(emberdb
   src/common/football_event_column.cpp
   src/identity/catalog_manifest.cpp
   src/identity/canonical_identity.cpp
+  src/identity/event_identity_coverage.cpp
   src/ingestion/metrica_event_adapter.cpp
   src/ingestion/statsbomb_metadata_adapter.cpp
   src/ingestion/statsbomb_event_adapter.cpp
@@ -107,6 +108,7 @@ if(BUILD_TESTING)
     tests/coordinate_normalization_test.cpp
     tests/entity_reconciliation_test.cpp
     tests/entity_review_test.cpp
+    tests/event_identity_coverage_test.cpp
     tests/football_event_validation_test.cpp
     tests/football_event_file_test.cpp
     tests/metrica_event_adapter_test.cpp
@@ -158,6 +160,35 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliTest.AggregatesAndGroupsFixture PROPERTIES
     PASS_REGULAR_EXPRESSION "Result rows: 2"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.FiltersWithComparisonAndNullPredicate
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --filter "minute>=12"
+      --filter "player_name IS NOT NULL"
+      --project provider_event_id,event_type,minute
+      --limit 1
+  )
+  set_tests_properties(EmberDbCliTest.FiltersWithComparisonAndNullPredicate PROPERTIES
+    PASS_REGULAR_EXPRESSION "Matched 1 event"
+  )
+
+  add_test(
+    NAME EmberDbCliTest.LimitsGroupedResults
+    COMMAND emberdb_cli query
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --aggregate "count(*)"
+      --group-by event_type
+      --limit 1
+  )
+  set_tests_properties(EmberDbCliTest.LimitsGroupedResults PROPERTIES
+    PASS_REGULAR_EXPRESSION "Result rows: 1"
   )
 
   add_test(
@@ -334,7 +365,7 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliManifestTest.ListsImportedCatalog PROPERTIES
     DEPENDS EmberDbCliManifestTest.ReimportsIdempotently
-    PASS_REGULAR_EXPRESSION "match.100.Premier League.2023/2024.1.2"
+    PASS_REGULAR_EXPRESSION "match.100.30.Premier League.2023/2024.1.2"
   )
   add_test(
     NAME EmberDbCliManifestTest.CleansStore
@@ -426,7 +457,7 @@ if(BUILD_TESTING)
     COMMAND emberdb_cli catalog add
       --review ${EMBERDB_CLI_CATALOG_REVIEW}
       --entity match --canonical-id 100
-      --competition "Premier League" --season "2017/2018"
+      --season-id 30
       --home-team-id 1 --away-team-id 2
       --home-score 4 --away-score 3
       --actor "CTest reviewer" --source "offline fixtures"
@@ -847,5 +878,71 @@ if(BUILD_TESTING)
   )
   set_tests_properties(EmberDbCliReconciliationTest.CleansReviews PROPERTIES
     DEPENDS "EmberDbCliReconciliationTest.ListsRejectedCandidate;EmberDbCliReconciliationTest.InspectsAcceptedCandidate"
+  )
+
+  set(EMBERDB_CLI_COVERAGE_REVIEW
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-coverage-review.json")
+  set(EMBERDB_CLI_COVERAGE_DATABASE
+      "${CMAKE_CURRENT_BINARY_DIR}/emberdb-cli-coverage-events.ember")
+  add_test(
+    NAME EmberDbCliCoverageTest.PreparesFiles
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_COVERAGE_REVIEW}
+      ${EMBERDB_CLI_COVERAGE_REVIEW}.tmp
+      ${EMBERDB_CLI_COVERAGE_REVIEW}.lock
+      ${EMBERDB_CLI_COVERAGE_DATABASE}
+      ${EMBERDB_CLI_COVERAGE_DATABASE}.tmp
+  )
+  add_test(
+    NAME EmberDbCliCoverageTest.CopiesReview
+    COMMAND ${CMAKE_COMMAND} -E copy
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/match_review_store.json
+      ${EMBERDB_CLI_COVERAGE_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCoverageTest.CopiesReview PROPERTIES
+    DEPENDS EmberDbCliCoverageTest.PreparesFiles
+  )
+  add_test(
+    NAME EmberDbCliCoverageTest.ImportsEvents
+    COMMAND emberdb_cli import
+      --provider statsbomb
+      --match-id 12345
+      --input ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complete_events.json
+      --output ${EMBERDB_CLI_COVERAGE_DATABASE}
+  )
+  set_tests_properties(EmberDbCliCoverageTest.ImportsEvents PROPERTIES
+    DEPENDS EmberDbCliCoverageTest.CopiesReview
+    PASS_REGULAR_EXPRESSION "Imported 2 events"
+  )
+  add_test(
+    NAME EmberDbCliCoverageTest.ReportsPersistedEvents
+    COMMAND emberdb_cli catalog coverage
+      --review ${EMBERDB_CLI_COVERAGE_REVIEW}
+      --database ${EMBERDB_CLI_COVERAGE_DATABASE}
+  )
+  set_tests_properties(EmberDbCliCoverageTest.ReportsPersistedEvents PROPERTIES
+    DEPENDS EmberDbCliCoverageTest.ImportsEvents
+    PASS_REGULAR_EXPRESSION "team.2.2.0.0"
+  )
+  add_test(
+    NAME EmberDbCliCoverageTest.LeavesReviewUnchanged
+    COMMAND ${CMAKE_COMMAND} -E compare_files
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/match_review_store.json
+      ${EMBERDB_CLI_COVERAGE_REVIEW}
+  )
+  set_tests_properties(EmberDbCliCoverageTest.LeavesReviewUnchanged PROPERTIES
+    DEPENDS EmberDbCliCoverageTest.ReportsPersistedEvents
+  )
+  add_test(
+    NAME EmberDbCliCoverageTest.CleansFiles
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+      ${EMBERDB_CLI_COVERAGE_REVIEW}
+      ${EMBERDB_CLI_COVERAGE_REVIEW}.tmp
+      ${EMBERDB_CLI_COVERAGE_REVIEW}.lock
+      ${EMBERDB_CLI_COVERAGE_DATABASE}
+      ${EMBERDB_CLI_COVERAGE_DATABASE}.tmp
+  )
+  set_tests_properties(EmberDbCliCoverageTest.CleansFiles PROPERTIES
+    DEPENDS EmberDbCliCoverageTest.LeavesReviewUnchanged
   )
 endif()

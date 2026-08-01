@@ -29,9 +29,10 @@ class AggregateExpression {
 };
 
 struct AggregationQuery {
-  std::vector<EqualityPredicate> filters;
+  std::vector<EventPredicate> filters;
   std::vector<FootballEventColumn> group_by;
   std::vector<AggregateExpression> aggregates;
+  std::optional<std::size_t> limit{std::nullopt};
 };
 
 using AggregationValue =

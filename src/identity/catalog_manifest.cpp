@@ -401,8 +401,8 @@ CatalogManifestResult mappingResult(const CatalogManifestEntry& entry,
 
 bool sameMatch(const CanonicalMatch& existing,
                const CanonicalMatch& expected) {
-  return existing.competition == expected.competition &&
-         existing.season == expected.season &&
+  return existing.season_id == expected.season_id &&
+         existing.legacy_ancestry == expected.legacy_ancestry &&
          existing.kickoff == expected.kickoff &&
          existing.home_team_id == expected.home_team_id &&
          existing.away_team_id == expected.away_team_id &&
@@ -465,8 +465,7 @@ CanonicalMatch manifestMatch(const CatalogManifestEntry& entry,
         "missing");
   }
   return {{entry.canonical_id},
-          competition->name,
-          season->name,
+          {entry.season_id},
           entry.kickoff_seconds
               ? std::optional<std::chrono::sys_seconds>{
                     std::chrono::sys_seconds{

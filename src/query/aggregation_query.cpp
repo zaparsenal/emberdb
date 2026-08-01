@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -27,15 +28,6 @@ bool isNumeric(FootballEventColumn column) noexcept {
   const auto type = columnValueType(column);
   return type == FootballEventValueType::Integer ||
          type == FootballEventValueType::Number;
-}
-
-bool matchesFilters(const FootballEventTable& table, std::size_t row,
-                    const std::vector<EqualityPredicate>& filters) {
-  return std::all_of(filters.begin(), filters.end(),
-                     [&](const EqualityPredicate& filter) {
-                       const auto value = table.cell(filter.column(), row);
-                       return value && *value == filter.value();
-                     });
 }
 
 void increment(std::uint64_t& value) {
@@ -259,28 +251,25 @@ AggregationResult executeAggregationQuery(const FootballEventTable& table,
   if (query.group_by.empty()) {
     groups.push_back({{}, std::vector<Accumulator>(query.aggregates.size())});
   }
+  std::map<std::vector<FootballEventCell>, std::size_t> group_indices;
 
-  for (std::size_t row = 0; row < table.rowCount(); ++row) {
-    if (!matchesFilters(table, row, query.filters)) {
-      continue;
-    }
-    const auto key = groupKey(table, query.group_by, row);
-    auto group = groups.begin();
+  for (const auto row : selectRows(table, {query.filters, std::nullopt})) {
+    auto group_index = std::size_t{0};
     if (!query.group_by.empty()) {
-      group = std::find_if(groups.begin(), groups.end(),
-                           [&](const GroupState& candidate) {
-                             return candidate.key == key;
-                           });
-      if (group == groups.end()) {
-        groups.push_back({key, std::vector<Accumulator>(query.aggregates.size())});
-        group = std::prev(groups.end());
+      auto key = groupKey(table, query.group_by, row);
+      const auto [entry, inserted] = group_indices.emplace(key, groups.size());
+      group_index = entry->second;
+      if (inserted) {
+        groups.push_back(
+            {std::move(key), std::vector<Accumulator>(query.aggregates.size())});
       }
     }
 
     for (std::size_t index = 0; index < query.aggregates.size(); ++index) {
       const auto column = query.aggregates[index].column();
       const auto cell = column ? table.cell(*column, row) : FootballEventCell{};
-      updateAccumulator(group->accumulators[index], query.aggregates[index], cell);
+      updateAccumulator(groups[group_index].accumulators[index],
+                        query.aggregates[index], cell);
     }
   }
 
@@ -294,8 +283,11 @@ AggregationResult executeAggregationQuery(const FootballEventTable& table,
   }
 
   std::vector<std::vector<AggregationCell>> rows;
-  rows.reserve(groups.size());
-  for (const auto& group : groups) {
+  const auto result_count = query.limit ? std::min(groups.size(), *query.limit)
+                                        : groups.size();
+  rows.reserve(result_count);
+  for (std::size_t group_index = 0; group_index < result_count; ++group_index) {
+    const auto& group = groups[group_index];
     std::vector<AggregationCell> result_row;
     result_row.reserve(column_names.size());
     for (const auto& cell : group.key) {

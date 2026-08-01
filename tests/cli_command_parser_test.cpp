@@ -100,10 +100,8 @@ TEST(CliCommandParserTest, ParsesAuditedCatalogAddAndMapOptions) {
       std::string_view{"match"},
       std::string_view{"--canonical-id"},
       std::string_view{"100"},
-      std::string_view{"--competition"},
-      std::string_view{"Premier League"},
-      std::string_view{"--season"},
-      std::string_view{"2023/2024"},
+      std::string_view{"--season-id"},
+      std::string_view{"30"},
       std::string_view{"--home-team-id"},
       std::string_view{"1"},
       std::string_view{"--away-team-id"},
@@ -123,6 +121,7 @@ TEST(CliCommandParserTest, ParsesAuditedCatalogAddAndMapOptions) {
   EXPECT_EQ(add.command, emberdb::cli::Command::CatalogAdd);
   EXPECT_EQ(add.catalog_entity, emberdb::CatalogEntityType::Match);
   EXPECT_EQ(add.canonical_id, 100);
+  EXPECT_EQ(add.season_id, 30);
   EXPECT_EQ(add.home_score, 2);
   EXPECT_EQ(add.away_score, 1);
 
@@ -335,6 +334,88 @@ TEST(CliCommandParserTest, ParsesReadOnlyCatalogValidationOptions) {
   EXPECT_EQ(options.catalog_entity, emberdb::CatalogEntityType::Team);
   EXPECT_EQ(options.provider, "wyscout");
   EXPECT_EQ(options.input, "teams.json");
+}
+
+TEST(CliCommandParserTest, ParsesReadOnlyEventIdentityCoverageOptions) {
+  constexpr std::array persisted_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"coverage"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--database"},
+      std::string_view{"match.ember"}};
+  const auto persisted = emberdb::cli::parseOptions(persisted_arguments);
+
+  EXPECT_EQ(persisted.command, emberdb::cli::Command::CatalogCoverage);
+  EXPECT_EQ(persisted.review, "review.json");
+  EXPECT_EQ(persisted.database, "match.ember");
+
+  constexpr std::array raw_arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"coverage"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--provider"},
+      std::string_view{"statsbomb"},
+      std::string_view{"--match-id"},
+      std::string_view{"12345"},
+      std::string_view{"--input"},
+      std::string_view{"events.json"}};
+  const auto raw = emberdb::cli::parseOptions(raw_arguments);
+
+  EXPECT_EQ(raw.command, emberdb::cli::Command::CatalogCoverage);
+  EXPECT_EQ(raw.provider, "statsbomb");
+  EXPECT_EQ(raw.match_id, 12345);
+  EXPECT_EQ(raw.input, "events.json");
+
+  constexpr std::array mixed_sources{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"catalog"},
+      std::string_view{"coverage"},
+      std::string_view{"--review"},
+      std::string_view{"review.json"},
+      std::string_view{"--database"},
+      std::string_view{"match.ember"},
+      std::string_view{"--provider"},
+      std::string_view{"statsbomb"},
+      std::string_view{"--match-id"},
+      std::string_view{"12345"},
+      std::string_view{"--input"},
+      std::string_view{"events.json"}};
+  EXPECT_THROW(
+      static_cast<void>(emberdb::cli::parseOptions(mixed_sources)),
+      std::runtime_error);
+}
+
+TEST(CliCommandParserTest, ParsesTypedFiltersNullsAndQueryLimits) {
+  constexpr std::array arguments{
+      std::string_view{"emberdb_cli"},
+      std::string_view{"query"},
+      std::string_view{"--database"},
+      std::string_view{"match.ember"},
+      std::string_view{"--filter"},
+      std::string_view{"minute>=12"},
+      std::string_view{"--filter"},
+      std::string_view{"player_name IS NOT NULL"},
+      std::string_view{"--project"},
+      std::string_view{"provider_event_id"},
+      std::string_view{"--limit"},
+      std::string_view{"5"}};
+
+  const auto options = emberdb::cli::parseOptions(arguments);
+  const auto query = emberdb::cli::makeEventQuery(options);
+
+  ASSERT_EQ(query.filters.size(), 2U);
+  EXPECT_EQ(query.filters[0].operation(),
+            emberdb::FilterOperator::GreaterOrEqual);
+  EXPECT_EQ(query.filters[0].value(),
+            emberdb::FootballEventValue{std::int32_t{12}});
+  EXPECT_EQ(query.filters[1].operation(),
+            emberdb::FilterOperator::IsNotNull);
+  EXPECT_FALSE(query.filters[1].operand());
+  EXPECT_EQ(query.limit, 5U);
 }
 
 TEST(CliCommandParserTest, PreservesCommandValidationFailures) {

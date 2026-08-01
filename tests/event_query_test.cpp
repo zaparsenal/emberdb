@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -77,6 +78,118 @@ TEST(EventQueryTest, RejectsFilterValuesWithTheWrongType) {
       (emberdb::EqualityPredicate{emberdb::FootballEventColumn::Minute,
                                   std::string("12")}),
       std::invalid_argument);
+}
+
+TEST(EventQueryTest, ValidatesPredicateOperatorAndOperandForms) {
+  EXPECT_THROW(
+      (emberdb::EventPredicate{emberdb::FootballEventColumn::Minute,
+                               emberdb::FilterOperator::Less}),
+      std::invalid_argument);
+  EXPECT_THROW(
+      (emberdb::EventPredicate{emberdb::FootballEventColumn::PlayerName,
+                               emberdb::FilterOperator::IsNull,
+                               std::string("unused")}),
+      std::invalid_argument);
+  EXPECT_THROW(
+      (emberdb::EventPredicate{emberdb::FootballEventColumn::StartX,
+                               emberdb::FilterOperator::Greater,
+                               std::int32_t{40}}),
+      std::invalid_argument);
+}
+
+TEST(EventQueryTest, SupportsAllTypedComparisonOperators) {
+  const auto events = table();
+  const auto selected = [&](emberdb::FilterOperator operation,
+                            emberdb::FootballEventValue value) {
+    return emberdb::selectRows(
+        events,
+        {{{emberdb::FootballEventColumn::Minute, operation, std::move(value)}},
+         std::nullopt});
+  };
+
+  EXPECT_EQ(selected(emberdb::FilterOperator::Equal, std::int32_t{12}),
+            (std::vector<std::size_t>{0, 1}));
+  EXPECT_EQ(selected(emberdb::FilterOperator::NotEqual, std::int32_t{12}),
+            (std::vector<std::size_t>{2}));
+  EXPECT_EQ(selected(emberdb::FilterOperator::Less, std::int32_t{13}),
+            (std::vector<std::size_t>{0, 1}));
+  EXPECT_EQ(selected(emberdb::FilterOperator::LessOrEqual, std::int32_t{12}),
+            (std::vector<std::size_t>{0, 1}));
+  EXPECT_EQ(selected(emberdb::FilterOperator::Greater, std::int32_t{12}),
+            (std::vector<std::size_t>{2}));
+  EXPECT_EQ(selected(emberdb::FilterOperator::GreaterOrEqual,
+                     std::int32_t{13}),
+            (std::vector<std::size_t>{2}));
+  EXPECT_EQ(
+      emberdb::selectRows(
+          events,
+          {{{emberdb::FootballEventColumn::EventType,
+             emberdb::FilterOperator::Less, std::string("Pass")}},
+           std::nullopt}),
+      (std::vector<std::size_t>{1}));
+  EXPECT_EQ(
+      emberdb::selectRows(
+          events,
+          {{{emberdb::FootballEventColumn::StartX,
+             emberdb::FilterOperator::Greater, 50.0}},
+           std::nullopt}),
+      (std::vector<std::size_t>{1}));
+}
+
+TEST(EventQueryTest, AppliesExplicitNullSemantics) {
+  const auto events = table();
+  EXPECT_EQ(
+      emberdb::selectRows(
+          events,
+          {{{emberdb::FootballEventColumn::PlayerName,
+             emberdb::FilterOperator::IsNull}},
+           std::nullopt}),
+      (std::vector<std::size_t>{2}));
+  EXPECT_EQ(
+      emberdb::selectRows(
+          events,
+          {{{emberdb::FootballEventColumn::PlayerName,
+             emberdb::FilterOperator::IsNotNull}},
+           std::nullopt}),
+      (std::vector<std::size_t>{0, 1}));
+
+  // Comparisons with null are unknown/non-matching, including !=.
+  EXPECT_EQ(
+      emberdb::selectRows(
+          events,
+          {{{emberdb::FootballEventColumn::PlayerName,
+             emberdb::FilterOperator::NotEqual, std::string("Nobody")}},
+           std::nullopt}),
+      (std::vector<std::size_t>{0, 1}));
+  EXPECT_TRUE(emberdb::selectRows(
+                  events,
+                  {{{emberdb::FootballEventColumn::EventType,
+                     emberdb::FilterOperator::IsNull}},
+                   std::nullopt})
+                  .empty());
+}
+
+TEST(EventQueryTest, LimitsMatchingRowsInStableSourceOrder) {
+  const auto events = table();
+  const auto selected = emberdb::selectRows(
+      events,
+      {{{emberdb::FootballEventColumn::Minute,
+         emberdb::FilterOperator::GreaterOrEqual, std::int32_t{12}}},
+       2U});
+  EXPECT_EQ(selected, (std::vector<std::size_t>{0, 1}));
+
+  const auto result = emberdb::executeQuery(
+      events,
+      {{{emberdb::FootballEventColumn::Minute,
+         emberdb::FilterOperator::GreaterOrEqual, std::int32_t{12}}},
+       {emberdb::FootballEventColumn::ProviderEventId},
+       1U});
+  ASSERT_EQ(result.rowCount(), 1U);
+  EXPECT_EQ(std::get<std::string>(*result.cell(0, 0)), "pass-1");
+
+  const auto empty = emberdb::executeQuery(
+      events, {{}, {emberdb::FootballEventColumn::ProviderEventId}, 0U});
+  EXPECT_EQ(empty.rowCount(), 0U);
 }
 
 TEST(EventQueryTest, RejectsEmptyAndDuplicateProjections) {

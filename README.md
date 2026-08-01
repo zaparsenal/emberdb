@@ -8,7 +8,7 @@ Implemented milestones include:
 
 - a provider-independent, typed `FootballEvent` model;
 - typed canonical competition, season, match, team, and player catalogs with
-  provider-to-canonical ID mappings;
+  provider-to-canonical ID mappings and typed match-to-season ancestry;
 - a provider adapter interface with StatsBomb Open Data JSON, Metrica Sports CSV, and
   the open Wyscout research JSON adapters;
 - metadata adapters for StatsBomb matches/lineups and the open Wyscout competition,
@@ -31,13 +31,15 @@ Implemented milestones include:
 - deterministic, read-only catalog validation reports for offline provider metadata,
   including mapping coverage, exact-name collisions, lifecycle conflicts, name drift,
   and season-parent context;
+- deterministic, read-only event identity coverage with separate resolved, unmapped,
+  and absent match/team/player counts plus per-event diagnostics;
 - reconciliation CLI commands to generate, list, inspect, accept, and reject match
   candidates;
 - safe preservation of missing possession, team, player, outcome, and coordinate values;
 - a typed 22-column in-memory `FootballEventTable` with row reconstruction and consistency validation;
 - canonical 0–100 by 0–100 coordinates with attacks oriented left to right;
 - preserved provider coordinates for traceability and provider-specific bounds validation;
-- provider-neutral typed equality filters and projections with explicit null results;
+- provider-neutral typed comparison and null filters, projections, and stable limits;
 - deterministic query execution that preserves imported event order;
 - typed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregation with optional grouping;
 - a versioned, checksummed columnar `.ember` file containing the normalized schema;
@@ -70,7 +72,7 @@ in-memory FootballEventTable (one typed vector per field)
         |              +----> validated reload without provider files
         |
         v
-typed filters, projections, aggregations, and grouping
+typed predicates, row selection, projections, aggregations, and indexed grouping
         |
         v
 CLI tabular results
@@ -87,6 +89,7 @@ versioned canonical manifest --> validated import plan ------+
                                 (dry-run or atomic apply)     |
                                                             |
 normalized FootballEvent -----------------------------------+--> canonical event identity
+                                                            +--> read-only event coverage
 provider match metadata + canonical team mappings ----------+--> ranked match candidates
                                                                        |
                                                                        v
@@ -132,11 +135,15 @@ Merging keeps the source record as a durable alias, redirects its provider mappi
 and flattens earlier aliases onto the final active target. Competition merges reparent
 seasons, season merges require both seasons to belong to the same competition, and team
 merges update canonical match sides unless that would collapse both sides to one team.
-Competition and season maintenance also updates matching legacy string labels on
-canonical matches. Player merges redirect only identity mappings because canonical
-matches do not own player records. Historical accepted candidates and audit entries
-remain valid through these redirects. Canonical match rename, deprecation, and merge are
-not supported.
+New canonical matches reference a typed canonical season, so competition and season
+labels are derived from the catalog and renames do not rewrite matches. Season merges
+repoint typed match ancestry. Review-store versions 1 through 4 are upgraded to typed
+ancestry only when their stored competition/season labels identify exactly one season;
+otherwise version 5 preserves those labels as explicit legacy ancestry instead of
+guessing an ID. Player merges redirect only identity mappings because canonical matches
+do not own player records. Historical accepted candidates and audit entries remain
+valid through these redirects. Canonical match rename, deprecation, and merge are not
+supported.
 
 StatsBomb metadata ingestion reads competition/season, kickoff, home/away teams, scores,
 and lineup players. Wyscout metadata ingestion reads its separate competition, team,
@@ -153,6 +160,11 @@ event; it does not overwrite the event's provider IDs. Audited catalog construct
 mapping APIs live on `MatchReviewStore`; each mutation records actor, source, reason,
 timestamp, and revision. A complete catalog and its audit records can be saved in the
 separate match review file. It is never embedded in an event `.ember` file.
+
+`analyzeEventIdentityCoverage` applies that same read-only resolution path across a
+`FootballEventTable`. Match, team, and player coverage separately count identities that
+are resolved, present but unmapped, or absent, and input-order diagnostics retain the
+provider event and source-file context. Neither the table nor the catalog is mutated.
 
 `catalog import` is a separate identity-authoring path under `identity`; it is not a
 provider ingestion adapter and does not participate in reconciliation scoring. The
@@ -372,19 +384,24 @@ player_name    minute  start_x  start_y  source_start_x  source_start_y
 Alex Forward   12      35.4167  39.0625  42.5            31.25
 ```
 
-`--filter` implements typed equality and may be repeated; repeated filters use `AND`
-semantics. Values are parsed according to the selected column, so `minute=12` is an
-integer comparison while `event_type=Pass` is a text comparison. Timestamp filter
-values are milliseconds. Projected nulls print as `NULL`, result rows retain source
-order, and duplicate projection columns are rejected.
+`--filter` accepts typed `=`, `!=`, `<`, `<=`, `>`, and `>=` comparisons and may be
+repeated; repeated filters use `AND` semantics. Values are parsed according to the
+selected column, so `minute>=12` is an integer comparison while `event_type=Pass` is a
+text comparison. Timestamp values are milliseconds. Explicit null predicates use a
+quoted argument such as `--filter 'player_name IS NULL'` or
+`--filter 'player_name IS NOT NULL'`; ordinary comparisons never match nulls, including
+`!=`. `--limit` caps projection rows in stable source order. Projected nulls print as
+`NULL`, and duplicate projection columns are rejected.
 
 The stable query column names are: `provider_event_id`, `match_id`, `period`,
 `timestamp`, `minute`, `second`, `possession_id`, `team_id`, `team_name`, `player_id`,
 `player_name`, `event_type`, `outcome`, `start_x`, `start_y`, `end_x`, `end_y`,
 `provider`, `source_start_x`, `source_start_y`, `source_end_x`, and `source_end_y`.
 
-The query API is declared in `include/emberdb/query/event_query.h`. It accepts typed
-`EqualityPredicate` values rather than strings; the CLI is only a translation boundary.
+The query API is declared in `include/emberdb/query/event_query.h`. Its typed
+`EventPredicate` and shared `RowSelection` layer perform deterministic AND-only
+selection for both projection and aggregation; `EqualityPredicate` remains a
+source-compatible alias. The CLI is only a string-to-typed-query translation boundary.
 
 Aggregate and group events:
 
@@ -416,7 +433,8 @@ more comma-separated columns. Existing `--filter` predicates run before grouping
 also ignore null inputs and return `NULL` when no non-null value exists. Null grouping
 keys form a group, and groups appear in first-seen source order. A global aggregation
 over no matching rows returns one row (`count(*)` is zero); a grouped aggregation over
-no matching rows returns no rows.
+no matching rows returns no rows. Group lookup is indexed while output retains
+first-seen order, and `--limit` caps final result groups rather than input events.
 
 The programmatic aggregation API is declared in
 `include/emberdb/query/aggregation_query.h`.
@@ -524,11 +542,17 @@ store revision.
   --entity team --canonical-id 1 --name "Arsenal" \
   --actor "reviewer@example.com" --source "provider team pages" \
   --reason "Create canonical team"
+
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity match --canonical-id 100 --season-id 30 \
+  --home-team-id 1 --away-team-id 2 \
+  --actor "reviewer@example.com" --source "league fixture list" \
+  --reason "Create canonical match"
 ```
 
 `competition`, `team`, and `player` additions require `--name`. A `season` also
-requires `--competition-id`. A `match` requires `--competition`, `--season`,
-`--home-team-id`, and `--away-team-id`; `--kickoff-seconds` is optional and
+requires `--competition-id`. A `match` requires `--season-id`, `--home-team-id`,
+and `--away-team-id`; `--kickoff-seconds` is optional and
 `--home-score`/`--away-score` must appear together.
 
 Map provider identities only after the canonical target exists:
@@ -615,6 +639,30 @@ agreement, and season-parent context. Exact matching is case-insensitive and col
 whitespace; it does not infer aliases or fuzzy matches. Because this command is
 read-only, it does not accept mutation provenance options such as `--actor`, `--source`,
 or `--reason`.
+
+## Event identity coverage CLI
+
+Measure how explicit mappings resolve normalized events without changing the event
+database or review store:
+
+```bash
+./build/emberdb_cli catalog coverage \
+  --review match-review.json \
+  --database match.ember
+
+./build/emberdb_cli catalog coverage \
+  --review match-review.json \
+  --provider statsbomb \
+  --match-id 12345 \
+  --input tests/fixtures/complete_events.json
+```
+
+The summary reports match, team, and player counts as `present`, `resolved`, `missing`,
+or `absent`. `missing` means the event carried a provider identity but the catalog had
+no explicit mapping; `absent` means the event carried no identity for that entity.
+Every event is then printed in source order with its provider IDs and names, resolution
+status, and any canonical IDs. A raw provider source and an existing `.ember` database
+are mutually exclusive, and the command never creates mappings or audit records.
 
 ## Entity candidate review CLI
 
@@ -782,15 +830,17 @@ a version 2 database.
 ## Persistent match review format
 
 Match review files are separate UTF-8 JSON documents identified by
-`emberdb-match-review` and format version 4. They store canonical competition, season,
+`emberdb-match-review` and format version 5. They store canonical competition, season,
 team, player, and match catalogs; all provider mappings; generated match and entity
 candidates; numeric confidence; complete per-field evidence; decision status and
 provenance; catalog-change provenance; canonical entity lifecycle state and merge
-targets; and a monotonic store revision. Version 1 review files load as revision zero
-with empty competition/season catalogs and no synthesized mappings. Version 2 files
-retain their catalog and match-review data with no entity candidates. Version 3 records
-load all canonical entities as active. The next successful write upgrades any earlier
-version to version 4.
+targets; typed or explicit legacy match ancestry; and a monotonic store revision.
+Version 1 review files load as revision zero with empty competition/season catalogs and
+no synthesized mappings. Version 2 files retain their catalog and match-review data
+with no entity candidates. Version 3 records load all canonical entities as active.
+Versions 1 through 4 infer a typed season only from one unique matching
+competition/season label pair and otherwise retain the labels as legacy ancestry. The
+next successful write upgrades any earlier version to version 5.
 
 Loading rebuilds the canonical catalog through its validation APIs and rejects duplicate
 records, dangling mappings, invalid candidate values, contradictory decision fields,
@@ -856,8 +906,8 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
 
 - Event `.ember` files are uncompressed and are loaded fully into memory; there is no metadata
   pruning, streaming scan, schema migration, or partial-column loader yet.
-- Equality is the only filter operation; there is no ordering, result limiting, SQL,
-  optimizer, general expression evaluation, or distinct aggregation yet.
+- Filters are AND-only comparisons or null predicates; there is no OR/NOT nesting,
+  ordering, SQL, optimizer, general expression evaluation, or distinct aggregation yet.
 - No compression, dictionary encoding, parallelism, SIMD, or memory mapping is used.
 - Only one event source file and one explicit match ID can be imported per invocation.
 - Metrica's standard CSV adapter does not yet read its newer Game 3 JSON/FIFA package,
@@ -867,28 +917,28 @@ Pass and carry end locations are supported. Outcomes are extracted from common S
   metadata files.
 - Canonical manifest v1 supports atomic additions and mappings, but not lifecycle
   operations, reactivation, lossless catalog export, or automatic alias discovery.
-- Catalog validation reports one provider metadata export and entity kind per command;
-  it does not yet aggregate multiple entity kinds, emit machine-readable threshold
-  results, or measure identity resolution across normalized football events.
+- Catalog metadata validation reports one provider export and entity kind per command,
+  while event coverage reports one event table per command. Neither emits
+  machine-readable threshold results or combines multiple inputs.
 - Entity candidates use exact normalized names only. They do not perform fuzzy matching,
   aliases, transliteration, or automatic acceptance, and the open Wyscout match metadata
   cannot generate season candidates without names.
 - Match candidate generation through the CLI currently supports StatsBomb and Wyscout
   metadata. There is no automatic candidate acceptance.
-- Accepted match mappings do not yet reconcile or rewrite football events.
+- Accepted mappings are resolved only through read-only coverage; canonical IDs are not
+  yet exposed as virtual query columns or persisted into event files.
 - Outcome extraction is intentionally limited to known common detail objects; the raw provider event is not retained.
 
 ## Long-term direction
 
 The intended system evolves from provider adapters to normalized events, columnar persistence, a limited SQL parser and planner, execution operators, and terminal/CSV/JSON output. Additional providers should be added only through adapters, never by leaking their raw schemas into storage.
 
-The next phase connects audited canonical identity to event analytics without rewriting
-provider IDs. First, canonical matches should reference typed season ancestry instead of
-duplicated competition and season labels. In parallel, read-only event identity coverage
-should exercise real mappings, while the query engine gains a shared row-selection
-foundation and reproducible performance baselines. Canonical IDs can then become virtual
-query columns tied to a catalog revision, followed by multi-match import and selected-
-column file scans.
+The next phase should expose canonical match, team, and player IDs as virtual query
+columns resolved against an explicitly loaded catalog revision, without rewriting
+provider IDs or persisting potentially stale resolutions into `.ember` files. That
+should build directly on the read-only coverage and shared row-selection APIs added in
+this milestone. Multi-match import, selected-column file scans, and reproducible
+performance baselines can follow as separate measured changes.
 
 Lossless catalog export and manifest lifecycle operations should wait until typed match
 ancestry and audit semantics can represent them faithfully. SQL remains deliberately

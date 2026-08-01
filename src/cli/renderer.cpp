@@ -142,6 +142,29 @@ std::string canonicalIdentifiersText(
   return output.str();
 }
 
+std::string_view eventIdentityStatusText(EventIdentityStatus status) {
+  switch (status) {
+    case EventIdentityStatus::Absent:
+      return "absent";
+    case EventIdentityStatus::Resolved:
+      return "resolved";
+    case EventIdentityStatus::Missing:
+      return "missing";
+  }
+  return "unknown";
+}
+
+std::string optionalRawIdentifierText(
+    const std::optional<Identifier>& identifier) {
+  return identifier ? std::to_string(*identifier) : "NULL";
+}
+
+void printCoverageCounts(std::ostream& output, std::string_view entity,
+                         const EventIdentityCoverageCounts& counts) {
+  output << entity << '\t' << counts.present << '\t' << counts.resolved
+         << '\t' << counts.missing << '\t' << counts.absent << '\n';
+}
+
 void printEntityCandidateSummary(
     std::ostream& output, const EntityCandidateRecord& candidate) {
   const auto& result = candidate.reconciliation;
@@ -170,7 +193,7 @@ void printUsage(std::ostream& output) {
             "--match-id ID --input PATH) "
             "(--project COLUMN[,COLUMN...] | --aggregate FUNCTION(COLUMN|*)) "
             "[--aggregate FUNCTION(COLUMN|*)]... [--group-by COLUMN[,COLUMN...]] "
-            "[--filter COLUMN=VALUE]...\n"
+            "[--filter EXPRESSION]... [--limit N]\n"
             "       emberdb_cli reconcile generate --review PATH "
             "--left-provider PROVIDER --left-input PATH "
             "--right-provider PROVIDER --right-input PATH\n"
@@ -204,6 +227,9 @@ void printUsage(std::ostream& output) {
             "       emberdb_cli catalog validate --review PATH "
             "--entity competition|season|team|player "
             "--provider PROVIDER --input PATH\n"
+            "       emberdb_cli catalog coverage --review PATH "
+            "(--database DATABASE | --provider PROVIDER --match-id ID "
+            "--input PATH)\n"
             "       emberdb_cli catalog candidates generate --review PATH "
             "--entity competition|season|team|player "
             "--provider PROVIDER --input PATH\n"
@@ -215,7 +241,12 @@ void printUsage(std::ostream& output) {
             "       emberdb_cli catalog candidates accept --review PATH "
             "--candidate-id ID --actor TEXT --source TEXT --reason TEXT\n"
             "       emberdb_cli catalog candidates reject --review PATH "
-            "--candidate-id ID --actor TEXT --source TEXT --reason TEXT\n";
+            "--candidate-id ID --actor TEXT --source TEXT --reason TEXT\n"
+            "\nFilter expressions: COLUMN{=|!=|<|<=|>|>=}VALUE, "
+            "\"COLUMN IS NULL\", or \"COLUMN IS NOT NULL\".\n"
+            "Match fields: --season-id ID --home-team-id ID "
+            "--away-team-id ID [--kickoff-seconds N] "
+            "[--home-score N --away-score N].\n";
 }
 
 void printImportResult(std::ostream& output, const FootballEventTable& table,
@@ -448,8 +479,11 @@ void printCatalogSummary(std::ostream& output,
   }
   output << "Matches: " << catalog.matches().size() << '\n';
   for (const auto& [id, match] : catalog.matches()) {
-    output << "match\t" << id.value << '\t' << match.competition << '\t'
-           << match.season << '\t' << match.home_team_id.value << '\t'
+    const auto labels = catalog.matchLabels(id);
+    output << "match\t" << id.value << '\t'
+           << optionalIdentifierText(match.season_id) << '\t'
+           << labels->competition << '\t' << labels->season << '\t'
+           << match.home_team_id.value << '\t'
            << match.away_team_id.value << '\n';
   }
   output << "Provider mappings:\n";
@@ -549,6 +583,40 @@ void printCatalogValidation(std::ostream& output,
            << canonicalIdentifiersText(record.canonical_ids) << '\t'
            << evidenceStatusText(record.name_status) << '\t'
            << catalogValidationContextStatusName(record.context_status)
+           << '\n';
+  }
+}
+
+void printEventIdentityCoverage(std::ostream& output,
+                                const EventIdentityCoverageReport& report,
+                                std::uint64_t review_revision) {
+  output << "Event identity coverage\n"
+         << "Source: " << report.source << '\n'
+         << "Review revision: " << review_revision << '\n'
+         << "Events: " << report.total_events << "\n\n"
+         << "entity\tpresent\tresolved\tmissing\tabsent\n";
+  printCoverageCounts(output, "match", report.matches);
+  printCoverageCounts(output, "team", report.teams);
+  printCoverageCounts(output, "player", report.players);
+  output << "\nindex\tsource\tprovider\tprovider_event_id\tprovider_match_id\t"
+            "match_status\tcanonical_match_id\tprovider_team_id\t"
+            "provider_team_name\tteam_status\tcanonical_team_id\t"
+            "provider_player_id\tprovider_player_name\tplayer_status\t"
+            "canonical_player_id\n";
+  for (const auto& event : report.events) {
+    output << event.event_index << '\t' << event.source << '\t'
+           << event.provider << '\t' << event.provider_event_id << '\t'
+           << event.provider_match_id << '\t'
+           << eventIdentityStatusText(event.match_status) << '\t'
+           << optionalIdentifierText(event.canonical_identity.match_id) << '\t'
+           << optionalRawIdentifierText(event.provider_team_id) << '\t'
+           << optionalText(event.provider_team_name) << '\t'
+           << eventIdentityStatusText(event.team_status) << '\t'
+           << optionalIdentifierText(event.canonical_identity.team_id) << '\t'
+           << optionalRawIdentifierText(event.provider_player_id) << '\t'
+           << optionalText(event.provider_player_name) << '\t'
+           << eventIdentityStatusText(event.player_status) << '\t'
+           << optionalIdentifierText(event.canonical_identity.player_id)
            << '\n';
   }
 }

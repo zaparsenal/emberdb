@@ -158,6 +158,16 @@ bool canonicalIdsAgree(const CanonicalIdentityCatalog& catalog,
          currentCanonicalId(catalog, entity_type, actual);
 }
 
+std::string canonicalMatchName(const CanonicalIdentityCatalog& catalog,
+                               CanonicalMatchId id) {
+  const auto labels = catalog.matchLabels(id);
+  if (!labels) {
+    throw std::invalid_argument("unknown canonical match ID " +
+                                std::to_string(id.value));
+  }
+  return labels->competition + " " + labels->season;
+}
+
 std::string canonicalEntityName(const CanonicalIdentityCatalog& catalog,
                                 CatalogEntityType entity_type,
                                 Identifier canonical_id) {
@@ -171,8 +181,7 @@ std::string canonicalEntityName(const CanonicalIdentityCatalog& catalog,
     case CatalogEntityType::Player:
       return catalog.player({canonical_id})->name;
     case CatalogEntityType::Match: {
-      const auto* match = catalog.match({canonical_id});
-      return match->competition + " " + match->season;
+      return canonicalMatchName(catalog, {canonical_id});
     }
   }
   return {};
@@ -557,8 +566,8 @@ void MatchReviewStore::addMatch(CanonicalMatch match,
   validateProvenance(provenance);
   requireRevisionAvailable(revision_);
   const auto id = match.id.value;
-  const auto name = match.competition + " " + match.season;
   catalog_.addMatch(std::move(match));
+  const auto name = canonicalMatchName(catalog_, {id});
   recordCatalogChange(CatalogChangeAction::Add, CatalogEntityType::Match, id,
                       name, std::nullopt, std::nullopt, std::nullopt,
                       std::move(provenance));
@@ -652,10 +661,9 @@ void MatchReviewStore::mapMatch(ProviderMatchReference provider_match,
   const auto provider = provider_match.provider;
   const auto provider_id = provider_match.id;
   catalog_.mapMatch(std::move(provider_match), canonical_match);
-  const auto* match = catalog_.match(canonical_match);
   recordCatalogChange(
       CatalogChangeAction::Map, CatalogEntityType::Match,
-      canonical_match.value, match->competition + " " + match->season,
+      canonical_match.value, canonicalMatchName(catalog_, canonical_match),
       std::move(provider), std::move(provider_id), std::nullopt,
       std::move(provenance));
 }

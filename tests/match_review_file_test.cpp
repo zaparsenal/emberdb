@@ -9,6 +9,65 @@
 
 namespace {
 
+std::filesystem::path fixturePath(const std::string& name) {
+  return std::filesystem::path(EMBERDB_TEST_FIXTURES_DIR) / name;
+}
+
+void writeUniquelyResolvableLegacyStore(const std::filesystem::path& path,
+                                        std::uint32_t version) {
+  std::ofstream output(path);
+  ASSERT_TRUE(output);
+  const auto lifecycle = version >= 4
+                             ? R"(, "status": "active", "merged_into": null)"
+                             : "";
+  output << R"({
+    "format": "emberdb-match-review",
+    "version": )"
+         << version << R"(,
+    "revision": 0,
+    "catalog": {
+      "competitions": [{"id": 20, "name": "Premier League")"
+         << lifecycle << R"(}],
+      "seasons": [{
+        "id": 30,
+        "competition_id": 20,
+        "name": "2017/2018")"
+         << lifecycle << R"(
+      }],
+      "teams": [
+        {"id": 1, "name": "North FC")"
+         << lifecycle << R"(},
+        {"id": 2, "name": "South FC")"
+         << lifecycle << R"(}
+      ],
+      "players": [],
+      "matches": [{
+        "id": 100,
+        "competition": "Premier League",
+        "season": "2017/2018",
+        "kickoff_seconds": null,
+        "home_team_id": 1,
+        "away_team_id": 2,
+        "home_score": null,
+        "away_score": null
+      }],
+      "competition_mappings": [],
+      "season_mappings": [],
+      "team_mappings": [],
+      "player_mappings": [],
+      "match_mappings": []
+    },
+    "catalog_changes": [],)";
+  if (version >= 3) {
+    output << R"(
+    "entity_candidates": [],)";
+  }
+  output << R"(
+    "candidates": []
+  })";
+  ASSERT_TRUE(output);
+}
+
 class MatchReviewFileTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -39,7 +98,7 @@ class MatchReviewFileTest : public ::testing::Test {
     catalog.addTeam({{1}, "Arsenal"});
     catalog.addTeam({{2}, "Leicester City"});
     catalog.addPlayer({{10}, "Alex Forward"});
-    catalog.addMatch({{100}, "Premier League", "2017/2018",
+    catalog.addMatch({{100}, {30},
                       std::chrono::sys_seconds{std::chrono::seconds{1'500'000'000}},
                       {1}, {2}, 4, 3});
     catalog.mapCompetition({"StatsBomb", "2"}, {20});
@@ -133,6 +192,9 @@ TEST_F(MatchReviewFileTest, RoundTripsCatalogEvidenceAndEveryDecisionState) {
   EXPECT_EQ(loaded.catalog().teams().size(), 2U);
   EXPECT_EQ(loaded.catalog().players().size(), 2U);
   EXPECT_EQ(loaded.catalog().matches().size(), 1U);
+  EXPECT_EQ(loaded.catalog().match({100})->season_id,
+            emberdb::CanonicalSeasonId{30});
+  EXPECT_FALSE(loaded.catalog().match({100})->legacy_ancestry);
   EXPECT_EQ(loaded.catalog().playerMappings().begin()->first.match_id, "match-1");
   EXPECT_EQ(loaded.catalog().resolveCompetition({"Wyscout", "364"}),
             emberdb::CanonicalCompetitionId{20});
@@ -271,6 +333,136 @@ TEST_F(MatchReviewFileTest, LoadsVersionThreeEntitiesAsActive) {
             emberdb::CanonicalEntityStatus::Active);
   EXPECT_EQ(loaded.catalog().player({10})->status,
             emberdb::CanonicalEntityStatus::Active);
+}
+
+TEST_F(MatchReviewFileTest, MigratesUniqueLegacyMatchAncestryToTypedSeason) {
+  std::ofstream(path_) << R"({
+    "format": "emberdb-match-review",
+    "version": 3,
+    "revision": 0,
+    "catalog": {
+      "competitions": [{"id": 20, "name": "Premier League"}],
+      "seasons": [
+        {"id": 30, "competition_id": 20, "name": "2017/2018"}
+      ],
+      "teams": [
+        {"id": 1, "name": "North FC"},
+        {"id": 2, "name": "South FC"}
+      ],
+      "players": [],
+      "matches": [{
+        "id": 100,
+        "competition": "Premier League",
+        "season": "2017/2018",
+        "kickoff_seconds": null,
+        "home_team_id": 1,
+        "away_team_id": 2,
+        "home_score": null,
+        "away_score": null
+      }],
+      "competition_mappings": [],
+      "season_mappings": [],
+      "team_mappings": [],
+      "player_mappings": [],
+      "match_mappings": []
+    },
+    "catalog_changes": [],
+    "entity_candidates": [],
+    "candidates": []
+  })";
+
+  const auto loaded = emberdb::loadMatchReviewStore(path_);
+
+  ASSERT_NE(loaded.catalog().match({100}), nullptr);
+  EXPECT_EQ(loaded.catalog().match({100})->season_id,
+            emberdb::CanonicalSeasonId{30});
+  EXPECT_FALSE(loaded.catalog().match({100})->legacy_ancestry);
+}
+
+TEST_F(MatchReviewFileTest,
+       MigratesUniqueAncestryAcrossLegacyVersionsTwoThroughFour) {
+  for (const auto version : {2U, 3U, 4U}) {
+    SCOPED_TRACE(version);
+    writeUniquelyResolvableLegacyStore(path_, version);
+
+    const auto loaded = emberdb::loadMatchReviewStore(path_);
+
+    ASSERT_NE(loaded.catalog().match({100}), nullptr);
+    EXPECT_EQ(loaded.catalog().match({100})->season_id,
+              emberdb::CanonicalSeasonId{30});
+    EXPECT_FALSE(loaded.catalog().match({100})->legacy_ancestry);
+  }
+}
+
+TEST_F(MatchReviewFileTest,
+       RetainsAmbiguousLegacyMatchAncestryWithoutGuessing) {
+  std::ofstream(path_) << R"({
+    "format": "emberdb-match-review",
+    "version": 3,
+    "revision": 0,
+    "catalog": {
+      "competitions": [
+        {"id": 20, "name": "Premier League"},
+        {"id": 21, "name": "Premier League"}
+      ],
+      "seasons": [
+        {"id": 30, "competition_id": 20, "name": "2017/2018"},
+        {"id": 31, "competition_id": 21, "name": "2017/2018"}
+      ],
+      "teams": [
+        {"id": 1, "name": "North FC"},
+        {"id": 2, "name": "South FC"}
+      ],
+      "players": [],
+      "matches": [{
+        "id": 100,
+        "competition": "Premier League",
+        "season": "2017/2018",
+        "kickoff_seconds": null,
+        "home_team_id": 1,
+        "away_team_id": 2,
+        "home_score": null,
+        "away_score": null
+      }],
+      "competition_mappings": [],
+      "season_mappings": [],
+      "team_mappings": [],
+      "player_mappings": [],
+      "match_mappings": []
+    },
+    "catalog_changes": [],
+    "entity_candidates": [],
+    "candidates": []
+  })";
+
+  const auto loaded = emberdb::loadMatchReviewStore(path_);
+
+  ASSERT_NE(loaded.catalog().match({100}), nullptr);
+  EXPECT_FALSE(loaded.catalog().match({100})->season_id);
+  ASSERT_TRUE(loaded.catalog().match({100})->legacy_ancestry);
+  EXPECT_EQ(loaded.catalog().match({100})->legacy_ancestry->competition,
+            "Premier League");
+  EXPECT_EQ(loaded.catalog().match({100})->legacy_ancestry->season,
+            "2017/2018");
+}
+
+TEST_F(MatchReviewFileTest,
+       RoundTripsVersionOneLegacyAncestryExplicitlyInVersionFive) {
+  const auto legacy = emberdb::loadMatchReviewStore(
+      fixturePath("match_review_store.json"));
+  ASSERT_NE(legacy.catalog().match({100}), nullptr);
+  EXPECT_FALSE(legacy.catalog().match({100})->season_id);
+  ASSERT_TRUE(legacy.catalog().match({100})->legacy_ancestry);
+
+  emberdb::createMatchReviewStore(legacy, path_);
+  const auto round_tripped = emberdb::loadMatchReviewStore(path_);
+
+  EXPECT_FALSE(round_tripped.catalog().match({100})->season_id);
+  ASSERT_TRUE(round_tripped.catalog().match({100})->legacy_ancestry);
+  EXPECT_EQ(round_tripped.catalog().match({100})->legacy_ancestry->competition,
+            "Premier League");
+  EXPECT_EQ(round_tripped.catalog().match({100})->legacy_ancestry->season,
+            "2017/2018");
 }
 
 TEST_F(MatchReviewFileTest, RejectsUnsupportedAndMalformedFilesWithContext) {

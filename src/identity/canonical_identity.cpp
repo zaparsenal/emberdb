@@ -130,7 +130,52 @@ std::optional<CanonicalId> resolve(
   return position->second;
 }
 
+void validateMatchCommon(const CanonicalIdentityCatalog& catalog,
+                         const CanonicalMatch& match) {
+  requirePositive(match.id, "canonical match ID");
+  const auto* home_team = catalog.team(match.home_team_id);
+  const auto* away_team = catalog.team(match.away_team_id);
+  if (home_team == nullptr || away_team == nullptr) {
+    throw std::invalid_argument(
+        "canonical match teams must already exist in the catalog");
+  }
+  requireActive(*home_team, "team");
+  requireActive(*away_team, "team");
+  if (match.home_team_id == match.away_team_id) {
+    throw std::invalid_argument("canonical match teams must be different");
+  }
+  if (match.home_score.has_value() != match.away_score.has_value() ||
+      (match.home_score && (*match.home_score < 0 || *match.away_score < 0))) {
+    throw std::invalid_argument(
+        "canonical match scores must be non-negative and both present or missing");
+  }
+}
+
 }  // namespace
+
+CanonicalMatch::CanonicalMatch(
+    CanonicalMatchId id, LegacyCanonicalMatchAncestry ancestry,
+    std::optional<std::chrono::sys_seconds> kickoff,
+    CanonicalTeamId home_team_id, CanonicalTeamId away_team_id,
+    std::optional<std::int32_t> home_score,
+    std::optional<std::int32_t> away_score)
+    : id(id),
+      legacy_ancestry(std::move(ancestry)),
+      kickoff(kickoff),
+      home_team_id(home_team_id),
+      away_team_id(away_team_id),
+      home_score(home_score),
+      away_score(away_score) {}
+
+CanonicalMatch CanonicalMatch::legacy(
+    CanonicalMatchId id, LegacyCanonicalMatchAncestry ancestry,
+    std::optional<std::chrono::sys_seconds> kickoff,
+    CanonicalTeamId home_team_id, CanonicalTeamId away_team_id,
+    std::optional<std::int32_t> home_score,
+    std::optional<std::int32_t> away_score) {
+  return CanonicalMatch{id, std::move(ancestry), kickoff, home_team_id,
+                        away_team_id, home_score, away_score};
+}
 
 void CanonicalIdentityCatalog::addCompetition(
     CanonicalCompetition competition) {
@@ -185,26 +230,36 @@ void CanonicalIdentityCatalog::addPlayer(CanonicalPlayer player) {
 }
 
 void CanonicalIdentityCatalog::addMatch(CanonicalMatch match) {
-  requirePositive(match.id, "canonical match ID");
-  if (match.competition.empty() || match.season.empty()) {
+  validateMatchCommon(*this, match);
+  if (!match.season_id || match.legacy_ancestry) {
     throw std::invalid_argument(
-        "canonical matches require competition and season");
+        "new canonical matches require typed season ancestry");
   }
-  const auto* home_team = team(match.home_team_id);
-  const auto* away_team = team(match.away_team_id);
-  if (home_team == nullptr || away_team == nullptr) {
+  const auto* canonical_season = season(*match.season_id);
+  if (canonical_season == nullptr) {
     throw std::invalid_argument(
-        "canonical match teams must already exist in the catalog");
+        "canonical match season must already exist in the catalog");
   }
-  requireActive(*home_team, "team");
-  requireActive(*away_team, "team");
-  if (match.home_team_id == match.away_team_id) {
-    throw std::invalid_argument("canonical match teams must be different");
+  requireActive(*canonical_season, "season");
+  const auto* canonical_competition =
+      competition(canonical_season->competition_id);
+  if (canonical_competition == nullptr) {
+    throw std::logic_error(
+        "canonical match season references an unknown competition");
   }
-  if (match.home_score.has_value() != match.away_score.has_value() ||
-      (match.home_score && (*match.home_score < 0 || *match.away_score < 0))) {
+  requireActive(*canonical_competition, "competition");
+  if (!matches_.emplace(match.id, std::move(match)).second) {
+    throw std::invalid_argument("duplicate canonical match ID");
+  }
+}
+
+void CanonicalIdentityCatalog::restoreLegacyMatch(CanonicalMatch match) {
+  validateMatchCommon(*this, match);
+  if (match.season_id || !match.legacy_ancestry ||
+      match.legacy_ancestry->competition.empty() ||
+      match.legacy_ancestry->season.empty()) {
     throw std::invalid_argument(
-        "canonical match scores must be non-negative and both present or missing");
+        "legacy canonical matches require explicit competition and season labels");
   }
   if (!matches_.emplace(match.id, std::move(match)).second) {
     throw std::invalid_argument("duplicate canonical match ID");
@@ -213,33 +268,12 @@ void CanonicalIdentityCatalog::addMatch(CanonicalMatch match) {
 
 void CanonicalIdentityCatalog::renameCompetition(
     CanonicalCompetitionId competition, std::string name) {
-  const auto previous_name =
-      requireEntity(competitions_, competition, "competition").name;
   renameEntity(competitions_, competition, std::move(name), "competition");
-  const auto& current_name = competitions_.at(competition).name;
-  for (auto& [unused, match] : matches_) {
-    static_cast<void>(unused);
-    if (match.competition == previous_name) {
-      match.competition = current_name;
-    }
-  }
 }
 
 void CanonicalIdentityCatalog::renameSeason(CanonicalSeasonId season,
                                             std::string name) {
-  const auto& entity = requireEntity(seasons_, season, "season");
-  const auto previous_name = entity.name;
-  const auto competition_name =
-      requireEntity(competitions_, entity.competition_id, "competition").name;
   renameEntity(seasons_, season, std::move(name), "season");
-  const auto& current_name = seasons_.at(season).name;
-  for (auto& [unused, match] : matches_) {
-    static_cast<void>(unused);
-    if (match.competition == competition_name &&
-        match.season == previous_name) {
-      match.season = current_name;
-    }
-  }
 }
 
 void CanonicalIdentityCatalog::renameTeam(CanonicalTeamId team,
@@ -281,18 +315,10 @@ void CanonicalIdentityCatalog::deprecatePlayer(CanonicalPlayerId player) {
 void CanonicalIdentityCatalog::mergeCompetition(
     CanonicalCompetitionId source, CanonicalCompetitionId target) {
   prepareMerge(competitions_, source, target, "competition");
-  const auto source_name = competitions_.at(source).name;
-  const auto target_name = competitions_.at(target).name;
   for (auto& [unused, season] : seasons_) {
     static_cast<void>(unused);
     if (season.competition_id == source) {
       season.competition_id = target;
-    }
-  }
-  for (auto& [unused, match] : matches_) {
-    static_cast<void>(unused);
-    if (match.competition == source_name) {
-      match.competition = target_name;
     }
   }
   remap(competition_mappings_, source, target);
@@ -308,13 +334,10 @@ void CanonicalIdentityCatalog::mergeSeason(CanonicalSeasonId source,
     throw std::invalid_argument(
         "canonical seasons must belong to the same competition to merge");
   }
-  const auto competition_name =
-      competitions_.at(target_entity.competition_id).name;
   for (auto& [unused, match] : matches_) {
     static_cast<void>(unused);
-    if (match.competition == competition_name &&
-        match.season == source_entity.name) {
-      match.season = target_entity.name;
+    if (match.season_id == source) {
+      match.season_id = target;
     }
   }
   remap(season_mappings_, source, target);
@@ -451,6 +474,35 @@ const CanonicalPlayer* CanonicalIdentityCatalog::player(CanonicalPlayerId id) co
 const CanonicalMatch* CanonicalIdentityCatalog::match(CanonicalMatchId id) const {
   const auto position = matches_.find(id);
   return position == matches_.end() ? nullptr : &position->second;
+}
+
+std::optional<CanonicalMatchLabels> CanonicalIdentityCatalog::matchLabels(
+    CanonicalMatchId id) const {
+  const auto* canonical_match = match(id);
+  if (canonical_match == nullptr) {
+    return std::nullopt;
+  }
+  if (canonical_match->season_id) {
+    const auto* canonical_season = season(*canonical_match->season_id);
+    if (canonical_season == nullptr) {
+      throw std::logic_error(
+          "canonical match references an unknown canonical season");
+    }
+    const auto* canonical_competition =
+        competition(canonical_season->competition_id);
+    if (canonical_competition == nullptr) {
+      throw std::logic_error(
+          "canonical match season references an unknown competition");
+    }
+    return CanonicalMatchLabels{canonical_competition->name,
+                                canonical_season->name};
+  }
+  if (canonical_match->legacy_ancestry) {
+    return CanonicalMatchLabels{
+        canonical_match->legacy_ancestry->competition,
+        canonical_match->legacy_ancestry->season};
+  }
+  throw std::logic_error("canonical match has no ancestry");
 }
 
 std::optional<CanonicalCompetitionId>

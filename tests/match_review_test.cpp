@@ -15,12 +15,14 @@ emberdb::ReviewProvenance provenance(std::string reason) {
 
 emberdb::MatchReviewStore reviewStore() {
   emberdb::CanonicalIdentityCatalog catalog;
+  catalog.addCompetition({{20}, "Premier League"});
+  catalog.addSeason({{30}, {20}, "2017/2018"});
   catalog.addTeam({{1}, "Arsenal"});
   catalog.addTeam({{2}, "Leicester City"});
-  catalog.addMatch({{100}, "Premier League", "2017/2018",
+  catalog.addMatch({{100}, {30},
                     std::chrono::sys_seconds{std::chrono::seconds{1'500'000'000}},
                     {1}, {2}, 4, 3});
-  catalog.addMatch({{101}, "Premier League", "2017/2018",
+  catalog.addMatch({{101}, {30},
                     std::chrono::sys_seconds{std::chrono::seconds{1'500'086'400}},
                     {1}, {2}, 1, 0});
   catalog.mapTeam({"StatsBomb", "10", std::nullopt}, {1});
@@ -83,7 +85,7 @@ TEST(MatchReviewStoreTest, AuditsCatalogAuthoringAndMappingRevisions) {
   store.mapPlayer({"Metrica", "Player1", "42"}, {10},
                   provenance("Map match-local player"));
   store.addTeam({{2}, "South FC"}, provenance("Create away team"));
-  store.addMatch({{100}, "Premier League", "2023/2024", std::nullopt,
+  store.addMatch({{100}, {30}, std::nullopt,
                   {1}, {2}, std::nullopt, std::nullopt},
                  provenance("Create match"));
   store.mapMatch({"StatsBomb", "12345"}, {100},

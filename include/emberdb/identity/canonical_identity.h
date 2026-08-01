@@ -85,15 +85,55 @@ struct CanonicalPlayer {
   std::optional<CanonicalPlayerId> merged_into;
 };
 
-struct CanonicalMatch {
-  CanonicalMatchId id;
+struct LegacyCanonicalMatchAncestry {
   std::string competition;
   std::string season;
+  bool operator==(const LegacyCanonicalMatchAncestry&) const = default;
+};
+
+struct CanonicalMatch {
+  CanonicalMatch(CanonicalMatchId id, CanonicalSeasonId season_id,
+                 std::optional<std::chrono::sys_seconds> kickoff,
+                 CanonicalTeamId home_team_id,
+                 CanonicalTeamId away_team_id,
+                 std::optional<std::int32_t> home_score,
+                 std::optional<std::int32_t> away_score)
+      : id(id),
+        season_id(season_id),
+        kickoff(kickoff),
+        home_team_id(home_team_id),
+        away_team_id(away_team_id),
+        home_score(home_score),
+        away_score(away_score) {}
+
+  [[nodiscard]] static CanonicalMatch legacy(
+      CanonicalMatchId id, LegacyCanonicalMatchAncestry ancestry,
+      std::optional<std::chrono::sys_seconds> kickoff,
+      CanonicalTeamId home_team_id, CanonicalTeamId away_team_id,
+      std::optional<std::int32_t> home_score,
+      std::optional<std::int32_t> away_score);
+
+  CanonicalMatchId id;
+  std::optional<CanonicalSeasonId> season_id;
+  std::optional<LegacyCanonicalMatchAncestry> legacy_ancestry;
   std::optional<std::chrono::sys_seconds> kickoff;
   CanonicalTeamId home_team_id;
   CanonicalTeamId away_team_id;
   std::optional<std::int32_t> home_score;
   std::optional<std::int32_t> away_score;
+
+ private:
+  CanonicalMatch(CanonicalMatchId id, LegacyCanonicalMatchAncestry ancestry,
+                 std::optional<std::chrono::sys_seconds> kickoff,
+                 CanonicalTeamId home_team_id,
+                 CanonicalTeamId away_team_id,
+                 std::optional<std::int32_t> home_score,
+                 std::optional<std::int32_t> away_score);
+};
+
+struct CanonicalMatchLabels {
+  std::string competition;
+  std::string season;
 };
 
 struct ProviderMatchReference {
@@ -160,6 +200,7 @@ class CanonicalIdentityCatalog {
   void addTeam(CanonicalTeam team);
   void addPlayer(CanonicalPlayer player);
   void addMatch(CanonicalMatch match);
+  void restoreLegacyMatch(CanonicalMatch match);
 
   void renameCompetition(CanonicalCompetitionId competition,
                          std::string name);
@@ -193,6 +234,8 @@ class CanonicalIdentityCatalog {
   [[nodiscard]] const CanonicalTeam* team(CanonicalTeamId id) const;
   [[nodiscard]] const CanonicalPlayer* player(CanonicalPlayerId id) const;
   [[nodiscard]] const CanonicalMatch* match(CanonicalMatchId id) const;
+  [[nodiscard]] std::optional<CanonicalMatchLabels> matchLabels(
+      CanonicalMatchId id) const;
 
   [[nodiscard]] std::optional<CanonicalCompetitionId> resolveCompetition(
       const ProviderCompetitionReference& provider_competition) const;

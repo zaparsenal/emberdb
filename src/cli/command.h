@@ -31,6 +31,7 @@ enum class Command {
   CatalogList,
   CatalogHistory,
   CatalogValidate,
+  CatalogCoverage,
   EntityCandidateGenerate,
   EntityCandidateList,
   EntityCandidateInspect,
@@ -74,8 +75,8 @@ struct Options {
   std::string name;
   Identifier competition_id{};
   bool has_competition_id{};
-  std::string competition;
-  std::string season;
+  Identifier season_id{};
+  bool has_season_id{};
   Identifier home_team_id{};
   bool has_home_team_id{};
   Identifier away_team_id{};

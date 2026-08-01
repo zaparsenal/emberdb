@@ -12,6 +12,7 @@
 #include "cli/command_parser.h"
 #include "cli/renderer.h"
 #include "emberdb/identity/catalog_manifest.h"
+#include "emberdb/identity/event_identity_coverage.h"
 #include "emberdb/ingestion/event_provider_adapter.h"
 #include "emberdb/ingestion/metrica_event_adapter.h"
 #include "emberdb/ingestion/provider_metadata.h"
@@ -131,6 +132,7 @@ bool isCatalogCommand(Command command) {
          command == Command::CatalogList ||
          command == Command::CatalogHistory ||
          command == Command::CatalogValidate ||
+         command == Command::CatalogCoverage ||
          isEntityCandidateCommand(command);
 }
 
@@ -235,6 +237,18 @@ void runCatalogCommand(const Options& options, std::ostream& output) {
     return;
   }
   auto store = loadMatchReviewStore(options.review);
+  if (options.command == Command::CatalogCoverage) {
+    const auto table = !options.database.empty()
+                           ? loadFootballEventTable(options.database)
+                           : importTable(options);
+    const auto source = !options.database.empty() ? options.database.string()
+                                                   : options.input.string();
+    printEventIdentityCoverage(
+        output,
+        analyzeEventIdentityCoverage(table, store.catalog(), source),
+        store.revision());
+    return;
+  }
   if (options.command == Command::CatalogList) {
     printCatalogSummary(output, store);
     return;
@@ -296,8 +310,7 @@ void runCatalogCommand(const Options& options, std::ostream& output) {
                 : std::nullopt;
         store.addMatch(
             {{options.canonical_id},
-             options.competition,
-             options.season,
+             {options.season_id},
              kickoff,
              {options.home_team_id},
              {options.away_team_id},

@@ -101,10 +101,12 @@ TEST(MetricaEventAdapterTest, ResolvesExplicitMatchScopedTeamMappings) {
       fixture("metrica_events.csv"),
       context(emberdb::AttackingDirection::LeftToRight));
   emberdb::CanonicalIdentityCatalog catalog;
+  catalog.addCompetition({{20}, "Example League"});
+  catalog.addSeason({{30}, {20}, "2023/2024"});
   catalog.addTeam({{1}, "Ember FC"});
   catalog.addTeam({{2}, "Ash United"});
-  catalog.addMatch({{100}, "Example League", "2023/2024", std::nullopt,
-                    {1}, {2}, std::nullopt, std::nullopt});
+  catalog.addMatch({{100}, {30}, std::nullopt, {1}, {2}, std::nullopt,
+                    std::nullopt});
   catalog.mapMatch({"Metrica", "42"}, {100});
   catalog.mapMetricaTeams("42", {1}, {2});
 

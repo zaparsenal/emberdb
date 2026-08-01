@@ -9,10 +9,12 @@ namespace {
 
 emberdb::CanonicalIdentityCatalog catalogWithMatch() {
   emberdb::CanonicalIdentityCatalog catalog;
+  catalog.addCompetition({{20}, "Premier League"});
+  catalog.addSeason({{30}, {20}, "2017/2018"});
   catalog.addTeam({{1}, "North FC"});
   catalog.addTeam({{2}, "South FC"});
   catalog.addPlayer({{10}, "Alex Forward"});
-  catalog.addMatch({{100}, "Premier League", "2017/2018",
+  catalog.addMatch({{100}, {30},
                     std::chrono::sys_seconds{std::chrono::seconds{1'500'000'000}},
                     {1}, {2}, 4, 3});
   return catalog;
@@ -20,8 +22,6 @@ emberdb::CanonicalIdentityCatalog catalogWithMatch() {
 
 TEST(CanonicalIdentityCatalogTest, MapsMultipleProvidersToCanonicalEntities) {
   auto catalog = catalogWithMatch();
-  catalog.addCompetition({{20}, "Premier League"});
-  catalog.addSeason({{30}, {20}, "2017/2018"});
   catalog.mapCompetition({"StatsBomb", "2"}, {20});
   catalog.mapCompetition({"Wyscout", "364"}, {20});
   catalog.mapSeason({"StatsBomb", "44"}, {30});
@@ -123,12 +123,25 @@ TEST(CanonicalIdentityCatalogTest, ValidatesCanonicalMatchRelationships) {
   emberdb::CanonicalIdentityCatalog catalog;
   catalog.addTeam({{1}, "North FC"});
   EXPECT_THROW(
-      catalog.addMatch({{100}, "League", "Season", std::nullopt, {1}, {2}, 1, 0}),
+      catalog.addMatch({{100}, {10}, std::nullopt, {1}, {2}, 1, 0}),
       std::invalid_argument);
   catalog.addTeam({{2}, "South FC"});
   EXPECT_THROW(
-      catalog.addMatch({{100}, "League", "Season", std::nullopt, {1}, {2}, 1,
-                        std::nullopt}),
+      catalog.addMatch({{100}, {10}, std::nullopt, {1}, {2}, 1, 0}),
+      std::invalid_argument);
+  EXPECT_THROW(
+      catalog.addMatch(emberdb::CanonicalMatch::legacy(
+          {100}, {"League", "Season"}, std::nullopt, {1}, {2}, 1, 0)),
+      std::invalid_argument);
+  catalog.addCompetition({{20}, "League"});
+  catalog.addSeason({{10}, {20}, "Season"});
+  EXPECT_THROW(
+      catalog.addMatch(
+          {{100}, {10}, std::nullopt, {1}, {2}, 1, std::nullopt}),
+      std::invalid_argument);
+  catalog.deprecateSeason({10});
+  EXPECT_THROW(
+      catalog.addMatch({{100}, {10}, std::nullopt, {1}, {2}, 1, 0}),
       std::invalid_argument);
 }
 
@@ -140,7 +153,7 @@ TEST(CanonicalIdentityCatalogTest,
   catalog.addTeam({{1}, "North FC"});
   catalog.addTeam({{2}, "South FC"});
   catalog.addPlayer({{10}, "Alex Forward"});
-  catalog.addMatch({{100}, "Premier League", "2023/2024", std::nullopt,
+  catalog.addMatch({{100}, {30}, std::nullopt,
                     {1}, {2}, std::nullopt, std::nullopt});
   catalog.mapPlayer({"StatsBomb", "99", std::nullopt}, {10});
 
@@ -156,8 +169,12 @@ TEST(CanonicalIdentityCatalogTest,
   EXPECT_EQ(catalog.player({10})->name, "Alex A. Forward");
   EXPECT_EQ(catalog.player({10})->status,
             emberdb::CanonicalEntityStatus::Deprecated);
-  EXPECT_EQ(catalog.match({100})->competition, "Premier Division");
-  EXPECT_EQ(catalog.match({100})->season, "2023-24");
+  ASSERT_TRUE(catalog.match({100})->season_id);
+  EXPECT_EQ(catalog.match({100})->season_id,
+            emberdb::CanonicalSeasonId{30});
+  ASSERT_TRUE(catalog.matchLabels({100}));
+  EXPECT_EQ(catalog.matchLabels({100})->competition, "Premier Division");
+  EXPECT_EQ(catalog.matchLabels({100})->season, "2023-24");
   EXPECT_EQ(catalog.resolvePlayer({"StatsBomb", "99", std::nullopt}),
             emberdb::CanonicalPlayerId{10});
   EXPECT_THROW(
@@ -202,8 +219,7 @@ TEST(CanonicalIdentityCatalogTest,
   catalog.addPlayer({{10}, "Alex Forward"});
   catalog.addPlayer({{11}, "A. Forward"});
   catalog.addPlayer({{12}, "Forward, Alex"});
-  catalog.addMatch({{100}, "Premier League Duplicate",
-                    "2023/2024 Duplicate", std::nullopt, {3}, {2},
+  catalog.addMatch({{100}, {30}, std::nullopt, {3}, {2},
                     std::nullopt, std::nullopt});
   catalog.mapCompetition({"StatsBomb", "2"}, {21});
   catalog.mapSeason({"StatsBomb", "44"}, {30});
@@ -236,8 +252,11 @@ TEST(CanonicalIdentityCatalogTest,
             emberdb::CanonicalPlayerId{10});
   EXPECT_EQ(catalog.season({31})->competition_id,
             emberdb::CanonicalCompetitionId{20});
-  EXPECT_EQ(catalog.match({100})->competition, "Premier League");
-  EXPECT_EQ(catalog.match({100})->season, "2023/2024");
+  EXPECT_EQ(catalog.match({100})->season_id,
+            emberdb::CanonicalSeasonId{31});
+  ASSERT_TRUE(catalog.matchLabels({100}));
+  EXPECT_EQ(catalog.matchLabels({100})->competition, "Premier League");
+  EXPECT_EQ(catalog.matchLabels({100})->season, "2023/2024");
   EXPECT_EQ(catalog.match({100})->home_team_id,
             emberdb::CanonicalTeamId{1});
 }
@@ -255,6 +274,27 @@ TEST(CanonicalIdentityCatalogTest,
             emberdb::CanonicalTeamId{1});
   EXPECT_EQ(catalog.match({100})->home_team_id,
             emberdb::CanonicalTeamId{1});
+}
+
+TEST(CanonicalIdentityCatalogTest,
+     PreservesExplicitLegacyLabelsWithoutAmbiguousRenamePropagation) {
+  emberdb::CanonicalIdentityCatalog catalog;
+  catalog.addCompetition({{20}, "Premier League"});
+  catalog.addSeason({{30}, {20}, "2017/2018"});
+  catalog.addTeam({{1}, "North FC"});
+  catalog.addTeam({{2}, "South FC"});
+  catalog.restoreLegacyMatch(emberdb::CanonicalMatch::legacy(
+      {100}, {"Premier League", "2017/2018"}, std::nullopt, {1}, {2},
+      std::nullopt, std::nullopt));
+
+  catalog.renameCompetition({20}, "Premier Division");
+  catalog.renameSeason({30}, "2017-18");
+
+  EXPECT_FALSE(catalog.match({100})->season_id);
+  ASSERT_TRUE(catalog.match({100})->legacy_ancestry);
+  ASSERT_TRUE(catalog.matchLabels({100}));
+  EXPECT_EQ(catalog.matchLabels({100})->competition, "Premier League");
+  EXPECT_EQ(catalog.matchLabels({100})->season, "2017/2018");
 }
 
 }  // namespace

@@ -10,6 +10,7 @@
 
 #include "cli/command.h"
 #include "emberdb/identity/catalog_manifest.h"
+#include "emberdb/identity/event_identity_coverage.h"
 #include "emberdb/query/aggregation_query.h"
 #include "emberdb/query/event_query.h"
 #include "emberdb/reconciliation/catalog_validation.h"
@@ -60,6 +61,9 @@ void printCatalogHistory(
 void printCatalogValidation(std::ostream& output,
                             const CatalogValidationReport& report,
                             std::uint64_t review_revision);
+void printEventIdentityCoverage(std::ostream& output,
+                                const EventIdentityCoverageReport& report,
+                                std::uint64_t review_revision);
 void printCatalogManifestReport(std::ostream& output,
                                 const CatalogManifestReport& report,
                                 bool dry_run, bool applied);

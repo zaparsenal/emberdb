@@ -94,6 +94,23 @@ TEST(AggregationQueryTest, AppliesFiltersBeforeGrouping) {
   EXPECT_EQ(std::get<std::int32_t>(*result.cell(1, 0)), 13);
 }
 
+TEST(AggregationQueryTest, UsesTypedComparisonsAndNullPredicates) {
+  const auto result = emberdb::executeAggregationQuery(
+      table(),
+      {{{emberdb::FootballEventColumn::Minute,
+         emberdb::FilterOperator::GreaterOrEqual, std::int32_t{12}},
+        {emberdb::FootballEventColumn::PlayerName,
+         emberdb::FilterOperator::IsNotNull}},
+       {emberdb::FootballEventColumn::EventType},
+       {{emberdb::AggregateFunction::Count}}});
+
+  ASSERT_EQ(result.rowCount(), 2U);
+  EXPECT_EQ(std::get<std::string>(*result.cell(0, 0)), "Pass");
+  EXPECT_EQ(std::get<std::uint64_t>(*result.cell(0, 1)), 1U);
+  EXPECT_EQ(std::get<std::string>(*result.cell(1, 0)), "Carry");
+  EXPECT_EQ(std::get<std::uint64_t>(*result.cell(1, 1)), 1U);
+}
+
 TEST(AggregationQueryTest, CoalescesNullGroupKeysAndPreservesThem) {
   auto events = table();
   events.append(event("pass-3", "Pass", std::nullopt, 14, std::nullopt));
@@ -123,6 +140,54 @@ TEST(AggregationQueryTest, GroupsByMultipleColumns) {
   EXPECT_EQ(std::get<std::string>(*result.cell(1, 1)), "Alex Forward");
   EXPECT_EQ(std::get<std::string>(*result.cell(2, 0)), "Pass");
   EXPECT_FALSE(result.cell(2, 1));
+}
+
+TEST(AggregationQueryTest, LimitsGroupsInFirstSeenOrder) {
+  const auto result = emberdb::executeAggregationQuery(
+      table(),
+      {{},
+       {emberdb::FootballEventColumn::EventType},
+       {{emberdb::AggregateFunction::Count}},
+       1U});
+  ASSERT_EQ(result.rowCount(), 1U);
+  EXPECT_EQ(std::get<std::string>(*result.cell(0, 0)), "Pass");
+  EXPECT_EQ(std::get<std::uint64_t>(*result.cell(0, 1)), 2U);
+
+  const auto empty = emberdb::executeAggregationQuery(
+      table(),
+      {{},
+       {emberdb::FootballEventColumn::EventType},
+       {{emberdb::AggregateFunction::Count}},
+       0U});
+  EXPECT_EQ(empty.rowCount(), 0U);
+}
+
+TEST(AggregationQueryTest, IndexesHighCardinalityGroupsCorrectly) {
+  emberdb::FootballEventTable events;
+  constexpr std::size_t group_count = 512;
+  for (std::size_t index = 0; index < group_count; ++index) {
+    events.append(event("first-" + std::to_string(index),
+                        "type-" + std::to_string(index), "Player",
+                        static_cast<std::int32_t>(index), std::nullopt));
+  }
+  for (std::size_t index = group_count; index > 0; --index) {
+    const auto group = index - 1;
+    events.append(event("second-" + std::to_string(group),
+                        "type-" + std::to_string(group), "Player",
+                        static_cast<std::int32_t>(group), std::nullopt));
+  }
+
+  const auto result = emberdb::executeAggregationQuery(
+      events,
+      {{},
+       {emberdb::FootballEventColumn::EventType},
+       {{emberdb::AggregateFunction::Count}}});
+  ASSERT_EQ(result.rowCount(), group_count);
+  for (std::size_t index = 0; index < group_count; ++index) {
+    EXPECT_EQ(std::get<std::string>(*result.cell(index, 0)),
+              "type-" + std::to_string(index));
+    EXPECT_EQ(std::get<std::uint64_t>(*result.cell(index, 1)), 2U);
+  }
 }
 
 TEST(AggregationQueryTest, ReturnsOneGlobalRowForEmptyInput) {

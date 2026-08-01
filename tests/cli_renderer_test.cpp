@@ -169,6 +169,48 @@ TEST(CliRendererTest, RendersCatalogValidationCoverageAndDetails) {
             std::string::npos);
 }
 
+TEST(CliRendererTest, RendersDeterministicEventIdentityCoverage) {
+  emberdb::EventIdentityCoverageReport report;
+  report.source = "events.ember";
+  report.total_events = 1;
+  report.matches = {1, 1, 0, 0};
+  report.teams = {1, 0, 1, 0};
+  report.players = {0, 0, 0, 1};
+  emberdb::EventIdentityDiagnostic event;
+  event.source = report.source;
+  event.provider = "StatsBomb";
+  event.provider_event_id = "event-1";
+  event.provider_match_id = 12345;
+  event.provider_team_id = 10;
+  event.provider_team_name = "Ember FC";
+  event.match_status = emberdb::EventIdentityStatus::Resolved;
+  event.team_status = emberdb::EventIdentityStatus::Missing;
+  event.player_status = emberdb::EventIdentityStatus::Absent;
+  event.canonical_identity.match_id = emberdb::CanonicalMatchId{100};
+  report.events.push_back(event);
+  std::ostringstream output;
+
+  emberdb::cli::printEventIdentityCoverage(output, report, 7);
+
+  EXPECT_EQ(
+      output.str(),
+      "Event identity coverage\n"
+      "Source: events.ember\n"
+      "Review revision: 7\n"
+      "Events: 1\n\n"
+      "entity\tpresent\tresolved\tmissing\tabsent\n"
+      "match\t1\t1\t0\t0\n"
+      "team\t1\t0\t1\t0\n"
+      "player\t0\t0\t0\t1\n\n"
+      "index\tsource\tprovider\tprovider_event_id\tprovider_match_id\t"
+      "match_status\tcanonical_match_id\tprovider_team_id\t"
+      "provider_team_name\tteam_status\tcanonical_team_id\t"
+      "provider_player_id\tprovider_player_name\tplayer_status\t"
+      "canonical_player_id\n"
+      "0\tevents.ember\tStatsBomb\tevent-1\t12345\tresolved\t100\t10\t"
+      "Ember FC\tmissing\tNULL\tNULL\tNULL\tabsent\tNULL\n");
+}
+
 TEST(CliRendererTest, RendersDeterministicCatalogManifestReview) {
   emberdb::CatalogManifestReport report;
   report.base_revision = 4;
@@ -230,6 +272,8 @@ TEST(CliRendererTest, RendersUsageForEveryCommandFamily) {
   EXPECT_NE(output.str().find("emberdb_cli catalog merge"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog validate"),
+            std::string::npos);
+  EXPECT_NE(output.str().find("emberdb_cli catalog coverage"),
             std::string::npos);
   EXPECT_NE(output.str().find("emberdb_cli catalog candidates generate"),
             std::string::npos);

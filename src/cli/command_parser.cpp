@@ -80,13 +80,49 @@ FootballEventValue parseFilterValue(FootballEventColumn column,
   throw std::runtime_error("Unsupported filter value type");
 }
 
-EqualityPredicate parseFilter(std::string_view text) {
-  const auto separator = text.find('=');
-  if (separator == std::string_view::npos || separator == 0) {
-    throw std::runtime_error("Filter must have the form COLUMN=VALUE");
+EventPredicate parseFilter(std::string_view text) {
+  constexpr std::string_view is_not_null = " IS NOT NULL";
+  constexpr std::string_view is_null = " IS NULL";
+  if (text.ends_with(is_not_null)) {
+    const auto column_name = text.substr(0, text.size() - is_not_null.size());
+    if (column_name.empty()) {
+      throw std::runtime_error("Filter null predicate requires a column");
+    }
+    return {parseColumn(column_name), FilterOperator::IsNotNull};
   }
-  const auto column = parseColumn(text.substr(0, separator));
-  return {column, parseFilterValue(column, text.substr(separator + 1))};
+  if (text.ends_with(is_null)) {
+    const auto column_name = text.substr(0, text.size() - is_null.size());
+    if (column_name.empty()) {
+      throw std::runtime_error("Filter null predicate requires a column");
+    }
+    return {parseColumn(column_name), FilterOperator::IsNull};
+  }
+
+  struct OperatorSyntax {
+    std::string_view text;
+    FilterOperator operation;
+  };
+  constexpr OperatorSyntax operators[] = {
+      {"!=", FilterOperator::NotEqual},
+      {"<=", FilterOperator::LessOrEqual},
+      {">=", FilterOperator::GreaterOrEqual},
+      {"=", FilterOperator::Equal},
+      {"<", FilterOperator::Less},
+      {">", FilterOperator::Greater},
+  };
+  for (const auto& syntax : operators) {
+    const auto separator = text.find(syntax.text);
+    if (separator == std::string_view::npos || separator == 0) {
+      continue;
+    }
+    const auto column = parseColumn(text.substr(0, separator));
+    return {column, syntax.operation,
+            parseFilterValue(column,
+                             text.substr(separator + syntax.text.size()))};
+  }
+  throw std::runtime_error(
+      "Filter must have the form COLUMN{=|!=|<|<=|>|>=}VALUE, "
+      "COLUMN IS NULL, or COLUMN IS NOT NULL");
 }
 
 AggregateFunction parseAggregateFunction(std::string_view name) {
@@ -199,6 +235,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command = Command::CatalogHistory;
     } else if (action == "validate") {
       options.command = Command::CatalogValidate;
+    } else if (action == "coverage") {
+      options.command = Command::CatalogCoverage;
     } else if (action == "candidates") {
       if (arguments.size() < 4) {
         throw std::runtime_error("Expected a catalog candidates action");
@@ -333,10 +371,9 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     } else if (option == "--competition-id") {
       options.competition_id = parseInteger<Identifier>(value, option);
       options.has_competition_id = true;
-    } else if (option == "--competition") {
-      options.competition = value;
-    } else if (option == "--season") {
-      options.season = value;
+    } else if (option == "--season-id") {
+      options.season_id = parseInteger<Identifier>(value, option);
+      options.has_season_id = true;
     } else if (option == "--home-team-id") {
       options.home_team_id = parseInteger<Identifier>(value, option);
       options.has_home_team_id = true;
@@ -372,6 +409,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::EntityCandidateReject;
   const bool is_catalog_validation =
       options.command == Command::CatalogValidate;
+  const bool is_catalog_coverage =
+      options.command == Command::CatalogCoverage;
   const bool is_catalog_import =
       options.command == Command::CatalogImport;
   const bool is_catalog =
@@ -384,12 +423,12 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       options.command == Command::CatalogMerge ||
       options.command == Command::CatalogList ||
       options.command == Command::CatalogHistory ||
-      is_catalog_validation || is_entity_review;
+      is_catalog_validation || is_catalog_coverage || is_entity_review;
   const bool has_catalog_identity_options =
       options.catalog_entity || options.has_canonical_id ||
       options.has_target_canonical_id ||
       !options.name.empty() || options.has_competition_id ||
-      !options.competition.empty() || !options.season.empty() ||
+      options.has_season_id ||
       options.has_home_team_id || options.has_away_team_id ||
       options.kickoff_seconds || options.home_score || options.away_score ||
       !options.provider_id.empty() || options.provider_match_id;
@@ -428,6 +467,49 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     if (options.review.empty()) {
       throw std::runtime_error("--review is required for catalog commands");
     }
+    if (is_catalog_coverage) {
+      const bool has_unrelated_options =
+          !options.output.empty() || options.has_limit ||
+          !options.filters.empty() || !options.projection.empty() ||
+          !options.group_by.empty() || !options.aggregates.empty() ||
+          !options.left_provider.empty() || !options.left_input.empty() ||
+          !options.right_provider.empty() || !options.right_input.empty() ||
+          options.has_candidate_id || options.has_canonical_match_id ||
+          options.candidate_status || has_catalog_identity_options ||
+          !options.actor.empty() || !options.source.empty() ||
+          !options.reason.empty();
+      if (has_unrelated_options) {
+        throw std::runtime_error(
+            "catalog coverage accepts only --review and one event source");
+      }
+      const bool has_complete_raw_source =
+          !options.provider.empty() && options.has_match_id &&
+          !options.input.empty();
+      const bool has_any_raw_source =
+          !options.provider.empty() || options.has_match_id ||
+          !options.input.empty();
+      if (!options.database.empty()) {
+        if (has_any_raw_source || options.home_first_half_direction) {
+          throw std::runtime_error(
+              "--database cannot be combined with raw event source options");
+        }
+      } else if (!has_complete_raw_source) {
+        throw std::runtime_error(
+            "catalog coverage requires --database or --provider, --match-id, "
+            "and --input");
+      }
+      if (options.home_first_half_direction &&
+          options.provider != "metrica") {
+        throw std::runtime_error(
+            "--home-first-half-direction is only valid with --provider metrica");
+      }
+      if (options.provider == "metrica" &&
+          !options.home_first_half_direction) {
+        throw std::runtime_error(
+            "--provider metrica requires --home-first-half-direction");
+      }
+      return options;
+    }
     if (is_catalog_validation) {
       const bool has_unrelated_options =
           options.has_match_id || !options.output.empty() ||
@@ -440,8 +522,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
           options.has_candidate_id || options.has_canonical_match_id ||
           options.candidate_status || options.has_canonical_id ||
           options.has_target_canonical_id || !options.name.empty() ||
-          options.has_competition_id || !options.competition.empty() ||
-          !options.season.empty() || options.has_home_team_id ||
+          options.has_competition_id || options.has_season_id ||
+          options.has_home_team_id ||
           options.has_away_team_id || options.kickoff_seconds ||
           options.home_score || options.away_score ||
           !options.provider_id.empty() || options.provider_match_id ||
@@ -473,7 +555,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
           options.has_canonical_match_id || options.has_canonical_id ||
           options.has_target_canonical_id ||
           !options.name.empty() || options.has_competition_id ||
-          !options.competition.empty() || !options.season.empty() ||
+          options.has_season_id ||
           options.has_home_team_id || options.has_away_team_id ||
           options.kickoff_seconds || options.home_score ||
           options.away_score || !options.provider_id.empty() ||
@@ -585,8 +667,8 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       throw std::runtime_error("a positive --canonical-id is required");
     }
     const bool has_authoring_fields =
-        options.has_competition_id || !options.competition.empty() ||
-        !options.season.empty() || options.has_home_team_id ||
+        options.has_competition_id || options.has_season_id ||
+        options.has_home_team_id ||
         options.has_away_team_id || options.kickoff_seconds ||
         options.home_score || options.away_score;
     const bool has_provider_identity =
@@ -633,12 +715,12 @@ Options parseOptions(std::span<const std::string_view> arguments) {
       }
       if (*options.catalog_entity == CatalogEntityType::Match) {
         if (!options.name.empty() || options.has_competition_id ||
-            options.competition.empty() || options.season.empty() ||
+            !options.has_season_id || options.season_id <= 0 ||
             !options.has_home_team_id || options.home_team_id <= 0 ||
             !options.has_away_team_id || options.away_team_id <= 0) {
           throw std::runtime_error(
-              "catalog add match requires --competition, --season, and positive "
-              "--home-team-id and --away-team-id");
+              "catalog add match requires positive --season-id, "
+              "--home-team-id, and --away-team-id");
         }
         if (options.home_score.has_value() !=
             options.away_score.has_value()) {
@@ -649,7 +731,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
         if (options.name.empty()) {
           throw std::runtime_error("--name is required for this catalog entity");
         }
-        if (!options.competition.empty() || !options.season.empty() ||
+        if (options.has_season_id ||
             options.has_home_team_id || options.has_away_team_id ||
             options.kickoff_seconds || options.home_score ||
             options.away_score) {
@@ -678,7 +760,7 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     }
     if (!options.name.empty() || options.has_competition_id ||
         options.has_target_canonical_id ||
-        !options.competition.empty() || !options.season.empty() ||
+        options.has_season_id ||
         options.has_home_team_id || options.has_away_team_id ||
         options.kickoff_seconds || options.home_score ||
         options.away_score) {
@@ -817,9 +899,6 @@ Options parseOptions(std::span<const std::string_view> arguments) {
     if (!options.projection.empty() && !options.group_by.empty()) {
       throw std::runtime_error("--group-by requires --aggregate");
     }
-    if (options.has_limit) {
-      throw std::runtime_error("--limit is only valid for import");
-    }
   }
   if (options.home_first_half_direction && options.provider != "metrica") {
     throw std::runtime_error(
@@ -840,6 +919,9 @@ EventQuery makeEventQuery(const Options& options) {
   for (const auto& filter : options.filters) {
     query.filters.push_back(parseFilter(filter));
   }
+  if (options.has_limit) {
+    query.limit = options.limit;
+  }
   return query;
 }
 
@@ -855,6 +937,9 @@ AggregationQuery makeAggregationQuery(const Options& options) {
   query.aggregates.reserve(options.aggregates.size());
   for (const auto& aggregate : options.aggregates) {
     query.aggregates.push_back(parseAggregate(aggregate));
+  }
+  if (options.has_limit) {
+    query.limit = options.limit;
   }
   return query;
 }

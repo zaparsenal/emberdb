@@ -22,6 +22,9 @@ Batch catalog authoring follows:
 - `FootballEvent` is the provider-independent interchange model.
 - Canonical match, team, and player identity stays separate from provider event fields;
   mappings must be explicit until a reconciliation milestone defines otherwise.
+- New canonical matches reference an existing typed canonical season. Competition and
+  season labels are derived through the catalog; persistence may retain explicit legacy
+  labels only when a version 1-4 review store cannot resolve them uniquely.
 - Canonical competition, season, team, and player lifecycle changes are non-destructive:
   deprecated and merged records remain durable, and every rename, deprecation, or merge
   must pass through the audited review-store path.
@@ -32,6 +35,10 @@ Batch catalog authoring follows:
 - Manifest dry runs are deterministic and non-mutating. A rejected plan must retain the
   exact loaded store, and a successful write must use revision checking plus atomic
   sibling-file replacement.
+- Event identity coverage is read-only and uses `resolveEvent`; absent provider
+  identities must remain distinct from present-but-unmapped identities.
+- Projection and aggregation share typed AND-only row selection. Query limits apply to
+  final output rows or groups, and grouped output preserves first-seen input order.
 - Missing source values remain explicit optional values. Do not silently default or discard malformed values.
 - Route normalized events through `validateFootballEvent`; adapters should add provider
   record context to validation failures rather than duplicating provider-neutral rules.
@@ -100,6 +107,15 @@ Run a typed fixture query with:
   --project player_name,minute,start_x,start_y,source_start_x,source_start_y
 ```
 
+Typed filters support `=`, `!=`, `<`, `<=`, `>`, and `>=`. Null predicates are explicit:
+
+```bash
+./build/emberdb_cli query --provider statsbomb --match-id 12345 \
+  --input tests/fixtures/complete_events.json \
+  --filter 'minute>=12' --filter 'player_name IS NOT NULL' \
+  --project player_name,minute --limit 10
+```
+
 Run a grouped fixture aggregation with:
 
 ```bash
@@ -151,6 +167,11 @@ Initialize and explicitly author a canonical identity review store with:
   --entity player --canonical-id 12 \
   --actor "reviewer@example.com" --source "catalog review" \
   --reason "Retire inactive identity"
+./build/emberdb_cli catalog add --review match-review.json \
+  --entity match --canonical-id 100 --season-id 30 \
+  --home-team-id 1 --away-team-id 2 \
+  --actor "reviewer@example.com" --source "fixture list" \
+  --reason "Create canonical match"
 ```
 
 Review and atomically apply a canonical identity manifest with:
@@ -195,9 +216,18 @@ Run a read-only provider metadata coverage report:
   --provider wyscout --input wyscout-teams.json
 ```
 
+Run read-only identity coverage across normalized events:
+
+```bash
+./build/emberdb_cli catalog coverage \
+  --review match-review.json --database match.ember
+```
+
 Catalog validation must remain deterministic and non-mutating. It reports explicit
 mapping coverage separately from normalized exact-name coverage and preserves missing,
 ambiguous, inactive, and season-parent conflict outcomes.
+Event coverage must likewise remain deterministic and non-mutating, preserve input
+order, and report absent identities separately from present-but-unmapped identities.
 
 ## Documentation discipline
 
